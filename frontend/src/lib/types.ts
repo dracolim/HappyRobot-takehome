@@ -15,6 +15,7 @@ export interface Task {
   assignedTo: string[]
   configuration: TaskConfiguration
   dependencies: string[]
+  commentCount: number
   createdAt: string
   updatedAt: string
 }
@@ -46,9 +47,17 @@ export interface User {
   updatedAt: string
 }
 
+export interface ProjectMember {
+  userId: string
+  name: string
+  email: string
+  role: "owner" | "member"
+  joinedAt: string
+}
+
 export const COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "todo", label: "To Do" },
   { id: "in_progress", label: "In Progress" },
+  { id: "in_review", label: "In Review" },
   { id: "done", label: "Completed" },
-  { id: "in_review", label: "Pending" },
 ]

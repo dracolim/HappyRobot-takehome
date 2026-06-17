@@ -12,12 +12,14 @@ interface Props {
   label: string
   status: TaskStatus
   tasks: Task[]
+  blockingCountMap: Map<string, number>
   onAddTask: () => void
+  onSelectTask: (task: Task) => void
 }
 
-export function KanbanColumn({ label, status, tasks, onAddTask }: Props) {
+export function KanbanColumn({ label, status, tasks, blockingCountMap, onAddTask, onSelectTask }: Props) {
   return (
-    <div className="flex flex-col w-72 shrink-0">
+    <div className="flex flex-col flex-1 min-w-0">
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${columnDot[status]}`} />
@@ -36,7 +38,12 @@ export function KanbanColumn({ label, status, tasks, onAddTask }: Props) {
 
       <div className="flex flex-col gap-2.5 min-h-20">
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            blockingCount={blockingCountMap.get(task.id) ?? 0}
+            onClick={() => onSelectTask(task)}
+          />
         ))}
       </div>
     </div>

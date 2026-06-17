@@ -24,7 +24,7 @@ export function Sidebar() {
     api.projects.list()
       .then((res) => setProjects(res.projects))
       .catch(() => {})
-  }, [])
+  }, [pathname])
 
   const logout = () => {
     localStorage.removeItem("token")

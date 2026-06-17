@@ -27,6 +27,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error(err.error ?? "Request failed")
   }
 
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T
+  }
   return res.json()
 }
 
@@ -52,17 +55,28 @@ export const api = {
         body: JSON.stringify(body),
       }),
   },
+  members: {
+    list: (projectId: string) =>
+      request<{ members: import("./types").ProjectMember[] }>(`/api/projects/${projectId}/members`),
+    invite: (projectId: string, email: string) =>
+      request<{ member: import("./types").ProjectMember }>(`/api/projects/${projectId}/members`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    remove: (projectId: string, userId: string) =>
+      request<void>(`/api/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
+  },
   tasks: {
     list: (projectId: string, cursor?: string) =>
       request<{ tasks: import("./types").Task[]; nextCursor: string | null }>(
         `/api/projects/${projectId}/tasks${cursor ? `?cursor=${cursor}` : ""}`
       ),
-    create: (projectId: string, body: Partial<import("./types").Task>) =>
+    create: (projectId: string, body: Partial<import("./types").Task> & { dependencyIds?: string[] }) =>
       request<{ task: import("./types").Task }>(`/api/projects/${projectId}/tasks`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    update: (projectId: string, taskId: string, body: Partial<import("./types").Task>) =>
+    update: (projectId: string, taskId: string, body: Partial<import("./types").Task> & { dependencyIds?: string[] }) =>
       request<{ task: import("./types").Task }>(`/api/projects/${projectId}/tasks/${taskId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
