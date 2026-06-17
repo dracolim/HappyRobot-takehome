@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb } from "drizzle-orm/pg-core"
+import { pgTable, uuid, text, timestamp, jsonb, primaryKey } from "drizzle-orm/pg-core"
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -18,6 +18,13 @@ export const projects = pgTable("projects", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 })
+
+export const projectMembers = pgTable("project_members", {
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  role: text("role").notNull().default("member"),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+}, (t) => [primaryKey({ columns: [t.projectId, t.userId] })])
 
 export const tasks = pgTable("tasks", {
   id: uuid("id").defaultRandom().primaryKey(),

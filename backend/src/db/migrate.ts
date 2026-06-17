@@ -47,10 +47,23 @@ const INIT_SQL = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
+  CREATE TABLE IF NOT EXISTS project_members (
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id    UUID NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    joined_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (project_id, user_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
+  CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_project_created ON tasks(project_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(project_id, status);
   CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id, created_at);
+
+  INSERT INTO project_members (project_id, user_id, role)
+  SELECT id, owner_id, 'owner' FROM projects
+  ON CONFLICT DO NOTHING;
 `
 
 export async function runMigrations() {
