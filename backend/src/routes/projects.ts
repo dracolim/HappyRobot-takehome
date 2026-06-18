@@ -1,16 +1,11 @@
 import { Router, Request, Response } from "express"
-import { z } from "zod"
 import { db } from "../db"
 import { projects, projectMembers, users } from "../db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import type { AuthRequest } from "../middleware/auth"
+import { CreateProjectSchema, InviteMemberSchema } from "@happyrobot/shared"
 
 const router = Router()
-
-const projectSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().default(""),
-})
 
 router.get("/", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -56,7 +51,7 @@ router.get("/:id", async (req: Request, res: Response): Promise<void> => {
 router.post("/", async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req as AuthRequest
-    const parsed = projectSchema.safeParse(req.body)
+    const parsed = CreateProjectSchema.safeParse(req.body)
     if (!parsed.success) { res.status(400).json({ error: "Invalid input" }); return }
 
     const [project] = await db
@@ -149,9 +144,10 @@ router.get("/:id/members", async (req: Request, res: Response): Promise<void> =>
 router.post("/:id/members", async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req as AuthRequest
-    const { email } = req.body
 
-    if (!email) { res.status(400).json({ error: "email required" }); return }
+    const parsed = InviteMemberSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
+    const { email } = parsed.data
 
     const [self] = await db
       .select()

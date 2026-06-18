@@ -1,11 +1,5 @@
-export type TaskStatus = "todo" | "in_progress" | "done" | "in_review"
-
-export interface TaskConfiguration {
-  priority: "low" | "medium" | "high" | "urgent"
-  description: string
-  tags: string[]
-  customFields: Record<string, unknown>
-}
+export type { TaskStatus, TaskPriority, TaskConfiguration, CreateTaskInput, UpdateTaskInput, CreateProjectInput, CreateCommentInput } from "@happyrobot/shared"
+import type { TaskStatus, TaskConfiguration } from "@happyrobot/shared"
 
 export interface Task {
   id: string

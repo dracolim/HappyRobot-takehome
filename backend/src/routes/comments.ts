@@ -4,6 +4,7 @@ import { comments, users, tasks } from "../db/schema"
 import { eq } from "drizzle-orm"
 import { broadcast } from "../ws/manager"
 import type { AuthRequest } from "../middleware/auth"
+import { CreateCommentSchema } from "@happyrobot/shared"
 
 const router = Router()
 
@@ -34,9 +35,10 @@ router.post("/:taskId/comments", async (req: Request, res: Response): Promise<vo
   try {
     const { userId } = req as AuthRequest
     const { taskId } = req.params
-    const { content } = req.body
 
-    if (!content) { res.status(400).json({ error: "content required" }); return }
+    const parsed = CreateCommentSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
+    const { content } = parsed.data
 
     const [task] = await db.select({ projectId: tasks.projectId }).from(tasks).where(eq(tasks.id, taskId))
     if (!task) { res.status(404).json({ error: "Task not found" }); return }

@@ -224,7 +224,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   }
 
   const handleInvite = async (email: string) => {
-    const res = await api.members.invite(projectId, email)
+    const res = await api.members.invite(projectId, { email })
     setMembers((prev) => {
       const exists = prev.find((m) => m.userId === res.member.userId)
       return exists ? prev : [...prev, res.member]

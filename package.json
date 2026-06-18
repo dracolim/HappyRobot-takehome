@@ -1,0 +1,5 @@
+{
+  "name": "happyrobot-takehome",
+  "private": true,
+  "workspaces": ["shared", "backend", "frontend"]
+}

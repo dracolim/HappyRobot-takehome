@@ -4,6 +4,7 @@ import { tasks, taskDependencies, comments, projectMembers } from "../db/schema"
 import { and, eq, lt, desc, inArray, count } from "drizzle-orm"
 import { broadcast } from "../ws/manager"
 import type { AuthRequest } from "../middleware/auth"
+import { CreateTaskSchema, UpdateTaskSchema } from "@happyrobot/shared"
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   todo: ["in_progress"],
@@ -97,10 +98,11 @@ router.post("/:projectId/tasks", async (req: Request, res: Response): Promise<vo
   try {
     const { userId } = req as AuthRequest
     const { projectId } = req.params
-    const { title, status = "todo", assignedTo = [], configuration = {}, dependencyIds } = req.body
-    const depIds: string[] = Array.isArray(dependencyIds) ? dependencyIds : []
 
-    if (!title) { res.status(400).json({ error: "title required" }); return }
+    const parsed = CreateTaskSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
+
+    const { title, status, assignedTo, configuration, dependencyIds: depIds } = parsed.data
 
     const task = await db.transaction(async (tx) => {
       const [created] = await tx
@@ -108,7 +110,7 @@ router.post("/:projectId/tasks", async (req: Request, res: Response): Promise<vo
         .values({
           projectId,
           title,
-          status,
+          status: status ?? "todo",
           assignedTo,
           configuration: { ...DEFAULT_CONFIG, ...configuration },
         })
@@ -136,7 +138,11 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
   try {
     const { userId } = req as AuthRequest
     const { projectId, taskId } = req.params
-    const { dependencyIds, ...fields } = req.body
+
+    const parsed = UpdateTaskSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
+
+    const { dependencyIds, configuration: configUpdate, ...fields } = parsed.data
 
     const [existing] = await db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!existing) { res.status(404).json({ error: "Not found" }); return }
@@ -174,10 +180,14 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
       }
     }
 
+    const mergedConfig = configUpdate !== undefined
+      ? { ...existing.configuration, ...configUpdate } as typeof existing.configuration
+      : undefined
+
     const updatedTask = await db.transaction(async (tx) => {
       const [task] = await tx
         .update(tasks)
-        .set({ ...fields, updatedAt: new Date() })
+        .set({ ...fields, ...(mergedConfig !== undefined ? { configuration: mergedConfig } : {}), updatedAt: new Date() })
         .where(eq(tasks.id, taskId))
         .returning()
 
