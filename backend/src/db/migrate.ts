@@ -55,11 +55,23 @@ const INIT_SQL = `
     PRIMARY KEY (project_id, user_id)
   );
 
+  CREATE TABLE IF NOT EXISTS attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    uploader_id UUID NOT NULL REFERENCES users(id),
+    filename TEXT NOT NULL,
+    object_key TEXT NOT NULL,
+    size BIGINT NOT NULL,
+    mime_type TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id);
   CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_tasks_project_created ON tasks(project_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(project_id, status);
   CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id, created_at);
 
   INSERT INTO project_members (project_id, user_id, role)
   SELECT id, owner_id, 'owner' FROM projects

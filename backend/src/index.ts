@@ -7,9 +7,11 @@ import { authRouter } from "./routes/auth"
 import { projectsRouter } from "./routes/projects"
 import { tasksRouter } from "./routes/tasks"
 import { commentsRouter } from "./routes/comments"
+import { taskAttachmentsRouter, attachmentRouter } from "./routes/attachments"
 import { setupWebSocket } from "./ws/manager"
 import { requireAuth, type AuthRequest } from "./middleware/auth"
 import { runMigrations } from "./db/migrate"
+import { ensureBucket } from "./storage/s3"
 
 const app = express()
 
@@ -44,6 +46,8 @@ app.use("/api/auth", authLimiter, authRouter)
 app.use("/api/projects", requireAuth, apiLimiter, projectsRouter)
 app.use("/api/projects", requireAuth, apiLimiter, tasksRouter)
 app.use("/api/tasks", requireAuth, apiLimiter, commentsRouter)
+app.use("/api/tasks", requireAuth, apiLimiter, taskAttachmentsRouter)
+app.use("/api/attachments", requireAuth, apiLimiter, attachmentRouter)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
@@ -52,6 +56,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 async function start() {
   await runMigrations()
+  await ensureBucket()
 
   const server = createServer(app)
   setupWebSocket(server)

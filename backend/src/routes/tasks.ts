@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express"
 import { db } from "../db"
-import { tasks, taskDependencies, comments, projectMembers } from "../db/schema"
+import { tasks, taskDependencies, comments, attachments, projectMembers } from "../db/schema"
 import { and, eq, lt, desc, inArray, count } from "drizzle-orm"
 import { broadcast } from "../ws/manager"
 import type { AuthRequest } from "../middleware/auth"
@@ -45,18 +45,16 @@ async function attachDependencies(rows: typeof tasks.$inferSelect[]) {
   }))
 }
 
-async function attachCommentCounts<T extends { id: string }>(rows: T[]) {
-  if (rows.length === 0) return rows.map((t) => ({ ...t, commentCount: 0 }))
-
-  const taskIds = rows.map((t) => t.id)
-  const counts = await db
-    .select({ taskId: comments.taskId, n: count() })
-    .from(comments)
-    .where(inArray(comments.taskId, taskIds))
-    .groupBy(comments.taskId)
-
-  const countMap = Object.fromEntries(counts.map((c) => [c.taskId, Number(c.n)]))
-  return rows.map((t) => ({ ...t, commentCount: countMap[t.id] ?? 0 }))
+async function attachCounts<T extends { id: string }>(
+  rows: T[],
+  getCounts: (ids: string[]) => Promise<Array<{ taskId: string; n: unknown }>>,
+  key: string,
+) {
+  if (rows.length === 0) return rows.map((t) => ({ ...t, [key]: 0 }))
+  const ids = rows.map((t) => t.id)
+  const counts = await getCounts(ids)
+  const map = Object.fromEntries(counts.map((c) => [c.taskId, Number(c.n)]))
+  return rows.map((t) => ({ ...t, [key]: map[t.id] ?? 0 }))
 }
 
 router.get("/:projectId/tasks", async (req: Request, res: Response): Promise<void> => {
@@ -77,7 +75,14 @@ router.get("/:projectId/tasks", async (req: Request, res: Response): Promise<voi
 
     const hasMore = rows.length > pageSize
     const withDeps = await attachDependencies(hasMore ? rows.slice(0, pageSize) : rows)
-    const data = await attachCommentCounts(withDeps)
+    const withComments = await attachCounts(withDeps,
+      (ids) => db.select({ taskId: comments.taskId, n: count() }).from(comments).where(inArray(comments.taskId, ids)).groupBy(comments.taskId),
+      "commentCount",
+    )
+    const data = await attachCounts(withComments,
+      (ids) => db.select({ taskId: attachments.taskId, n: count() }).from(attachments).where(inArray(attachments.taskId, ids)).groupBy(attachments.taskId),
+      "attachmentCount",
+    )
 
     res.json({
       tasks: data,
@@ -120,7 +125,7 @@ router.post("/:projectId/tasks", async (req: Request, res: Response): Promise<vo
       return created
     })
 
-    const result = { ...task, dependencies: depIds, commentCount: 0 }
+    const result = { ...task, dependencies: depIds, commentCount: 0, attachmentCount: 0 }
     broadcast(projectId, { type: "task.created", task: result }, userId).catch(() => {})
     res.status(201).json({ task: result })
   } catch (err) {

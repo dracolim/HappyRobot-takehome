@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, primaryKey } from "drizzle-orm/pg-core"
+import { pgTable, uuid, text, timestamp, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core"
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -62,5 +62,16 @@ export const comments = pgTable("comments", {
     .notNull(),
   authorId: uuid("author_id").references(() => users.id).notNull(),
   content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const attachments = pgTable("attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
+  uploaderId: uuid("uploader_id").references(() => users.id).notNull(),
+  filename: text("filename").notNull(),
+  objectKey: text("object_key").notNull(),
+  size: bigint("size", { mode: "number" }).notNull(),
+  mimeType: text("mime_type").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })
