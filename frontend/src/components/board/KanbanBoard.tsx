@@ -1,11 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { DndContext, DragOverlay, PointerSensor, pointerWithin, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core"
 import { api } from "@/lib/api"
 import { COLUMNS } from "@/lib/types"
 import type { ProjectMember, Task, TaskStatus } from "@/lib/types"
 import { useProjectSocket, type PresenceUser, type SocketEvent } from "@/lib/useProjectSocket"
 import { KanbanColumn } from "./KanbanColumn"
+import { TaskCard } from "./TaskCard"
 import { TaskModal } from "./TaskModal"
 import { TaskDetailModal, UpdatePayload } from "./TaskDetailModal"
 
@@ -116,6 +118,8 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   const [showMembers, setShowMembers] = useState(false)
   const [presenceMap, setPresenceMap] = useState<Map<string, PresenceUser[]>>(new Map())
   const [realtimeComments, setRealtimeComments] = useState<import("@/lib/types").Comment[]>([])
+  const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [dragError, setDragError] = useState<string | null>(null)
   const membersPanelRef = useRef<HTMLDivElement>(null)
 
   const currentUserId = typeof window !== "undefined"
@@ -142,6 +146,9 @@ export function KanbanBoard({ projectId, projectName }: Props) {
       setSelectedTask((prev) => (prev?.id === event.taskId ? null : prev))
     } else if (event.type === "comment.created") {
       setRealtimeComments((prev) => prev.some((c) => c.id === event.comment.id) ? prev : [...prev, event.comment])
+      setTasks((prev) => prev.map((t) =>
+        t.id === event.comment.taskId ? { ...t, commentCount: (t.commentCount ?? 0) + 1 } : t
+      ))
     } else if (event.type === "presence.updated") {
       setPresenceMap((prev) => {
         const next = new Map(prev)
@@ -195,6 +202,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     tags: string[]
     assignedTo: string[]
     dependencyIds: string[]
+    files: File[]
   }) => {
     if (!modalStatus) return
 
@@ -232,7 +240,12 @@ export function KanbanBoard({ projectId, projectName }: Props) {
         },
         dependencyIds: data.dependencyIds,
       })
-      .then((res) => setTasks((prev) => prev.map((t) => (t.id === optimistic.id ? res.task : t))))
+      .then((res) => {
+        setTasks((prev) => prev.map((t) => (t.id === optimistic.id ? res.task : t)))
+        if (data.files.length > 0) {
+          Promise.allSettled(data.files.map((f) => api.attachments.upload(res.task.id, f))).catch(() => {})
+        }
+      })
       .catch(() => setTasks((prev) => prev.filter((t) => t.id !== optimistic.id)))
   }
 
@@ -257,6 +270,50 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     await api.tasks.delete(projectId, taskId)
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
     setSelectedTask(null)
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
+
+  const activeDragBlockedByDeps = activeTask
+    ? tasks.filter((t) => (activeTask.dependencies ?? []).includes(t.id) && t.status !== "done")
+    : []
+
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    setActiveTask(tasks.find((t) => t.id === active.id) ?? null)
+  }
+
+  const showDragError = (msg: string) => {
+    setDragError(msg)
+    setTimeout(() => setDragError(null), 4000)
+  }
+
+  const handleDragEnd = async ({ active, over }: DragEndEvent) => {
+    setActiveTask(null)
+    if (!over) return
+    const newStatus = over.id as TaskStatus
+    const task = tasks.find((t) => t.id === active.id)
+    if (!task || task.status === newStatus) return
+
+    if (newStatus === "done" && activeDragBlockedByDeps.length > 0) {
+      showDragError(`Blocked by: ${activeDragBlockedByDeps.map((t) => t.title).join(", ")}`)
+      return
+    }
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)))
+    try {
+      await api.tasks.update(projectId, task.id, { status: newStatus })
+    } catch (err) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)))
+      if (err instanceof Error) showDragError(err.message)
+    }
+  }
+
+  const handleCommentPosted = (taskId: string) => {
+    setTasks((prev) => prev.map((t) =>
+      t.id === taskId ? { ...t, commentCount: (t.commentCount ?? 0) + 1 } : t
+    ))
   }
 
   const handleInvite = async (email: string) => {
@@ -332,26 +389,45 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           </div>
         </div>
 
-        <div className="flex gap-5 p-8 flex-1 min-w-0">
-          {COLUMNS.map((col) => (
-            <KanbanColumn
-              key={col.id}
-              label={col.label}
-              status={col.id}
-              tasks={tasksByStatus(col.id)}
-              blockingCountMap={blockingCountMap}
-              presenceMap={presenceMap}
-              onAddTask={() => setModalStatus(col.id)}
-              onSelectTask={(task) => setSelectedTask(task)}
-            />
-          ))}
-        </div>
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
+          <div className="flex gap-5 p-8 flex-1 min-w-0">
+            {COLUMNS.map((col) => (
+              <KanbanColumn
+                key={col.id}
+                label={col.label}
+                status={col.id}
+                tasks={tasksByStatus(col.id)}
+                blockingCountMap={blockingCountMap}
+                presenceMap={presenceMap}
+                onAddTask={() => setModalStatus(col.id)}
+                onSelectTask={(task) => setSelectedTask(task)}
+                isBlockedByDeps={col.id === "done" && activeDragBlockedByDeps.length > 0}
+              />
+            ))}
+          </div>
+          <DragOverlay>
+            {activeTask && (
+              <TaskCard
+                task={activeTask}
+                blockingCount={blockingCountMap.get(activeTask.id) ?? 0}
+                viewers={presenceMap.get(activeTask.id) ?? []}
+              />
+            )}
+          </DragOverlay>
+        </DndContext>
+
+        {dragError && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#0E0D0C] text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg pointer-events-none whitespace-nowrap">
+            {dragError}
+          </div>
+        )}
       </div>
 
       {modalStatus && (
         <TaskModal
           status={modalStatus}
           existingTasks={tasks}
+          members={members}
           onClose={() => setModalStatus(null)}
           onSubmit={handleCreateTask}
         />
@@ -370,6 +446,8 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           onHeartbeat={heartbeat}
           viewers={presenceMap.get(selectedTask.id) ?? []}
           realtimeComments={realtimeComments}
+          onCommentPosted={handleCommentPosted}
+          members={members}
         />
       )}
     </>

@@ -6,7 +6,7 @@ import type { Task, TaskStatus } from "@/lib/types"
 const statusConfig: Record<TaskStatus, { label: string; bg: string; text: string }> = {
   todo: { label: "To Do", bg: "bg-black/[0.06]", text: "text-[#0E0D0C]/60" },
   in_progress: { label: "In Progress", bg: "bg-blue-50", text: "text-blue-700" },
-  in_review: { label: "Pending", bg: "bg-amber-50", text: "text-amber-700" },
+  in_review: { label: "In Review", bg: "bg-amber-50", text: "text-amber-700" },
   done: { label: "Completed", bg: "bg-green-50", text: "text-green-700" },
 }
 

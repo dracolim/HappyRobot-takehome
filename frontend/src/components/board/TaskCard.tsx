@@ -1,11 +1,22 @@
+"use client"
+
+import { useDraggable } from "@dnd-kit/core"
+import { CSS } from "@dnd-kit/utilities"
 import type { Task, TaskStatus } from "@/lib/types"
 import type { PresenceUser } from "@/lib/useProjectSocket"
 
-const priorityColors: Record<string, { bg: string; text: string }> = {
-  low: { bg: "bg-green-50", text: "text-green-700" },
-  medium: { bg: "bg-yellow-50", text: "text-yellow-700" },
-  high: { bg: "bg-orange-50", text: "text-orange-700" },
-  urgent: { bg: "bg-red-50", text: "text-red-600" },
+const flagIcon = (
+  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+    <path d="M2 1.5h6v5L5 5l-3 1.5V1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+    <path d="M2 9V1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+  </svg>
+)
+
+const priorityConfig: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+  low:    { bg: "bg-green-50",  text: "text-green-700",  icon: flagIcon },
+  medium: { bg: "bg-yellow-50", text: "text-yellow-700", icon: flagIcon },
+  high:   { bg: "bg-orange-50", text: "text-orange-700", icon: flagIcon },
+  urgent: { bg: "bg-red-50",    text: "text-red-600",    icon: flagIcon },
 }
 
 const statusShort: Record<TaskStatus, string> = {
@@ -26,23 +37,31 @@ interface Props {
   task: Task
   blockingCount: number
   viewers: PresenceUser[]
-  onClick: () => void
+  onClick?: () => void
+  draggable?: boolean
 }
 
-export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
+export function TaskCard({ task, blockingCount, viewers, onClick, draggable = false }: Props) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: task.id,
+    disabled: !draggable,
+  })
+
   const priority = task.configuration.priority
-  const description = task.configuration.description ?? ""
+  const tags = task.configuration.tags ?? []
   const depCount = (task.dependencies?.length ?? 0) + blockingCount
   const commentCount = task.commentCount ?? 0
-  const pc = priorityColors[priority] ?? priorityColors.medium
+  const pc = priorityConfig[priority] ?? priorityConfig.medium
   const sc = statusColors[task.status]
-
   const hasViewers = viewers.length > 0
 
   return (
     <div
+      ref={setNodeRef}
+      style={{ transform: isDragging ? undefined : CSS.Transform.toString(transform), opacity: isDragging ? 0 : 1 }}
+      {...(draggable ? { ...attributes, ...listeners } : {})}
       onClick={onClick}
-      className={`bg-white rounded-xl p-4 border cursor-pointer hover:shadow-md transition-all ${hasViewers ? "border-blue-400 shadow-sm shadow-blue-100" : "border-black/[0.06] hover:border-black/10"}`}
+      className={`bg-white rounded-xl p-5 border cursor-pointer hover:shadow-md transition-all ${hasViewers ? "border-blue-400 shadow-sm shadow-blue-100" : "border-black/[0.06] hover:border-black/10"}`}
     >
       {hasViewers && (
         <div className="flex items-center gap-1.5 mb-2">
@@ -63,9 +82,10 @@ export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
           </span>
         </div>
       )}
-      {/* Top badges */}
+
       <div className="flex items-center gap-1.5 mb-3">
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md capitalize ${pc.bg} ${pc.text}`}>
+        <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md capitalize ${pc.bg} ${pc.text}`}>
+          {pc.icon}
           {priority}
         </span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${sc.bg} ${sc.text}`}>
@@ -73,25 +93,29 @@ export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
         </span>
       </div>
 
-      {/* Title */}
-      <p className="text-sm font-semibold text-[#0E0D0C] leading-snug mb-1.5">
+      <p className="text-sm font-semibold text-[#0E0D0C] leading-snug mb-2">
         {task.title}
       </p>
 
-      {/* Description preview */}
-      {description && (
-        <p className="text-xs text-[#0E0D0C]/40 leading-relaxed line-clamp-2 mb-3">
-          {description}
-        </p>
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-3">
+          {tags.slice(0, 3).map((tag) => (
+            <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-md border border-black/[0.08] text-[#0E0D0C]/45 font-medium">
+              {tag}
+            </span>
+          ))}
+          {tags.length > 3 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-black/[0.08] text-[#0E0D0C]/30">
+              +{tags.length - 3}
+            </span>
+          )}
+        </div>
       )}
 
-      {/* Footer */}
-      <div className={`flex items-center justify-between gap-2 ${description ? "" : "mt-3"}`}>
-        {/* Left: dep count + comment count */}
+      <div className="flex items-center justify-between gap-2 mt-3">
         <div className="flex items-center gap-3">
           {depCount > 0 && (
             <span className="flex items-center gap-1 text-[11px] text-[#0E0D0C]/35">
-              {/* Chain link icon */}
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none" className="shrink-0">
                 <path d="M5.5 8.5a3 3 0 0 0 4.243 0l1.414-1.414a3 3 0 0 0-4.243-4.243L6.086 4.17" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
                 <path d="M8.5 5.5a3 3 0 0 0-4.243 0L2.843 6.914a3 3 0 0 0 4.243 4.243L7.914 9.83" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
@@ -101,7 +125,6 @@ export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
           )}
           {commentCount > 0 && (
             <span className="flex items-center gap-1 text-[11px] text-[#0E0D0C]/35">
-              {/* Speech bubble icon */}
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0">
                 <path d="M10 1H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1.5L6 11l2.5-2H10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
               </svg>
@@ -110,7 +133,6 @@ export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
           )}
         </div>
 
-        {/* Right: stacked assignee avatars */}
         <div className="flex -space-x-1.5 ml-auto">
           {task.assignedTo.slice(0, 3).map((name) => (
             <div

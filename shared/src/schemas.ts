@@ -8,10 +8,10 @@ export const TaskPrioritySchema = z.enum(["low", "medium", "high", "urgent"])
 export type TaskStatus = z.infer<typeof TaskStatusSchema>
 
 export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  todo: ["in_progress"],
-  in_progress: ["in_review", "todo"],
-  in_review: ["done", "in_progress"],
-  done: ["in_review"],
+  todo: ["in_progress", "in_review", "done"],
+  in_progress: ["todo", "in_review", "done"],
+  in_review: ["todo", "in_progress", "done"],
+  done: ["todo", "in_progress", "in_review"],
 }
 
 // ── Task ─────────────────────────────────────────────────────────────────────
