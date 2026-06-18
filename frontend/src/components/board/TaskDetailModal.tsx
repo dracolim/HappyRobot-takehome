@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import type { Comment, Task, TaskStatus } from "@/lib/types"
 import { TaskDag } from "./TaskDag"
@@ -10,6 +10,7 @@ export interface UpdatePayload {
   status?: TaskStatus
   assignedTo?: string[]
   dependencyIds?: string[]
+  updatedAt?: string
   configuration?: {
     priority?: "low" | "medium" | "high" | "urgent"
     description?: string
@@ -25,6 +26,11 @@ interface Props {
   onSave: (taskId: string, updates: UpdatePayload) => Promise<void>
   onDelete: (taskId: string) => Promise<void>
   onOpenTask: (task: Task) => void
+  onJoinTask: (taskId: string) => void
+  onLeaveTask: (taskId: string) => void
+  onHeartbeat: (taskId: string) => void
+  viewers: { userId: string; name: string }[]
+  realtimeComments: Comment[]
 }
 
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
@@ -50,7 +56,7 @@ const priorityDot: Record<string, string> = {
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const
 
-export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask }: Props) {
+export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask, onJoinTask, onLeaveTask, onHeartbeat, viewers, realtimeComments }: Props) {
   const [isEditing, setIsEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -63,6 +69,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   const [editAssignedTo, setEditAssignedTo] = useState<string[]>(task.assignedTo ?? [])
   const [editDependencyIds, setEditDependencyIds] = useState<string[]>(task.dependencies ?? [])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [transitioning, setTransitioning] = useState<TaskStatus | null>(null)
   const [commentsList, setCommentsList] = useState<Comment[]>([])
   const [commentInput, setCommentInput] = useState("")
@@ -76,9 +83,26 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     (t) => (task.dependencies ?? []).includes(t.id) && t.status !== "done"
   )
 
+  // merge fetched + realtime comments, deduped — computed at render, no setState-in-effect needed
+  const allComments = useMemo(() => {
+    const ids = new Set(commentsList.map((c) => c.id))
+    return [...commentsList, ...realtimeComments.filter((c) => !ids.has(c.id))]
+  }, [commentsList, realtimeComments])
+
   useEffect(() => {
     api.comments.list(task.id).then((res) => setCommentsList(res.comments)).catch(() => {})
   }, [task.id])
+
+  // presence: join on open, leave on close, heartbeat every 15s
+  useEffect(() => {
+    onJoinTask(task.id)
+    return () => onLeaveTask(task.id)
+  }, [task.id, onJoinTask, onLeaveTask])
+
+  useEffect(() => {
+    const id = setInterval(() => onHeartbeat(task.id), 15_000)
+    return () => clearInterval(id)
+  }, [task.id, onHeartbeat])
 
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
@@ -129,25 +153,40 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   }
 
   const handleTransition = async (newStatus: TaskStatus) => {
+    setSaveError(null)
     setTransitioning(newStatus)
-    await onSave(task.id, { status: newStatus }).finally(() => setTransitioning(null))
-    onClose()
+    try {
+      await onSave(task.id, { status: newStatus, updatedAt: task.updatedAt })
+      onClose()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to update")
+    } finally {
+      setTransitioning(null)
+    }
   }
 
   const handleSave = async () => {
+    setSaveError(null)
     setSaving(true)
-    await onSave(task.id, {
-      title: editTitle,
-      assignedTo: editAssignedTo,
-      dependencyIds: editDependencyIds,
-      configuration: {
-        priority: editPriority,
-        description: editDescription,
-        tags: editTags,
-        customFields: task.configuration.customFields,
-      },
-    }).finally(() => setSaving(false))
-    setIsEditing(false)
+    try {
+      await onSave(task.id, {
+        title: editTitle,
+        assignedTo: editAssignedTo,
+        dependencyIds: editDependencyIds,
+        updatedAt: task.updatedAt,
+        configuration: {
+          priority: editPriority,
+          description: editDescription,
+          tags: editTags,
+          customFields: task.configuration.customFields,
+        },
+      })
+      setIsEditing(false)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save")
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDelete = async () => {
@@ -275,6 +314,31 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
             <h2 className="text-xl font-semibold text-[#0E0D0C]">{task.title}</h2>
           )}
         </div>
+
+        {/* Viewers banner */}
+        {viewers.length > 0 && (
+          <div className="flex items-center gap-2 px-6 py-2 bg-blue-50 border-b border-blue-100">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+            <div className="flex -space-x-1">
+              {viewers.slice(0, 3).map((v) => (
+                <div key={v.userId} title={v.name} className="w-5 h-5 rounded-full bg-blue-500 border-2 border-blue-50 flex items-center justify-center text-[8px] font-bold text-white">
+                  {v.name[0]?.toUpperCase()}
+                </div>
+              ))}
+            </div>
+            <span className="text-xs text-blue-600">
+              {viewers.length === 1 ? `${viewers[0].name} is also viewing` : `${viewers.length} others are viewing`}
+            </span>
+          </div>
+        )}
+
+        {/* Save conflict error */}
+        {saveError && (
+          <div className="flex items-center justify-between px-6 py-2 bg-red-50 border-b border-red-100">
+            <span className="text-xs text-red-600">{saveError}</span>
+            <button type="button" onClick={() => setSaveError(null)} className="text-red-400 hover:text-red-600 text-sm leading-none">×</button>
+          </div>
+        )}
 
         {/* Two-column body */}
         <div className="flex flex-1 min-h-0">
@@ -527,9 +591,9 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
             {/* Comments header */}
             <div className="px-5 py-4 border-b border-black/[0.06] shrink-0">
               <p className="text-xs font-semibold uppercase tracking-wider text-[#0E0D0C]">
-                Comments{commentsList.length > 0 && (
+                Comments{allComments.length > 0 && (
                   <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-black/5 text-[#0E0D0C]/50 normal-case tracking-normal">
-                    {commentsList.length}
+                    {allComments.length}
                   </span>
                 )}
               </p>
@@ -537,10 +601,10 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
 
             {/* Comments list */}
             <div className="flex-1 overflow-y-auto thin-scroll px-5 py-4 flex flex-col gap-4">
-              {commentsList.length === 0 ? (
+              {allComments.length === 0 ? (
                 <p className="text-xs italic text-[#0E0D0C]/25">No comments yet</p>
               ) : (
-                commentsList.map((c) => (
+                allComments.map((c) => (
                   <div key={c.id} className="flex gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-[#0E0D0C] flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5">
                       {(c.author?.name ?? c.authorId)[0]?.toUpperCase()}

@@ -1,4 +1,5 @@
 import type { Task, TaskStatus } from "@/lib/types"
+import type { PresenceUser } from "@/lib/useProjectSocket"
 
 const priorityColors: Record<string, { bg: string; text: string }> = {
   low: { bg: "bg-green-50", text: "text-green-700" },
@@ -24,10 +25,11 @@ const statusColors: Record<TaskStatus, { bg: string; text: string }> = {
 interface Props {
   task: Task
   blockingCount: number
+  viewers: PresenceUser[]
   onClick: () => void
 }
 
-export function TaskCard({ task, blockingCount, onClick }: Props) {
+export function TaskCard({ task, blockingCount, viewers, onClick }: Props) {
   const priority = task.configuration.priority
   const description = task.configuration.description ?? ""
   const depCount = (task.dependencies?.length ?? 0) + blockingCount
@@ -35,11 +37,32 @@ export function TaskCard({ task, blockingCount, onClick }: Props) {
   const pc = priorityColors[priority] ?? priorityColors.medium
   const sc = statusColors[task.status]
 
+  const hasViewers = viewers.length > 0
+
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-xl p-4 border border-black/[0.06] cursor-pointer hover:shadow-md hover:border-black/10 transition-all"
+      className={`bg-white rounded-xl p-4 border cursor-pointer hover:shadow-md transition-all ${hasViewers ? "border-blue-400 shadow-sm shadow-blue-100" : "border-black/[0.06] hover:border-black/10"}`}
     >
+      {hasViewers && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <div className="flex -space-x-1">
+            {viewers.slice(0, 3).map((v) => (
+              <div
+                key={v.userId}
+                title={`${v.name} is viewing`}
+                className="w-5 h-5 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center text-[8px] font-bold text-white shrink-0"
+              >
+                {v.name[0]?.toUpperCase()}
+              </div>
+            ))}
+          </div>
+          <span className="text-[10px] text-blue-500 font-medium">
+            {viewers.length === 1 ? `${viewers[0].name} is viewing` : `${viewers.length} viewing`}
+          </span>
+        </div>
+      )}
       {/* Top badges */}
       <div className="flex items-center gap-1.5 mb-3">
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md capitalize ${pc.bg} ${pc.text}`}>

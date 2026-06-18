@@ -143,9 +143,16 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
     if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
 
     const { dependencyIds, configuration: configUpdate, ...fields } = parsed.data
+    const clientUpdatedAt = req.body.updatedAt as string | undefined
 
     const [existing] = await db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!existing) { res.status(404).json({ error: "Not found" }); return }
+
+    // optimistic locking — reject if client's version is stale
+    if (clientUpdatedAt && new Date(clientUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
+      res.status(409).json({ error: "Task was modified by someone else, please refresh" })
+      return
+    }
 
     if (fields.status && fields.status !== existing.status) {
       const allowed = VALID_TRANSITIONS[existing.status] ?? []
@@ -185,11 +192,20 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
       : undefined
 
     const updatedTask = await db.transaction(async (tx) => {
+      // conditional WHERE: if changing status, only succeed if current status still matches
+      const whereClause = fields.status
+        ? and(eq(tasks.id, taskId), eq(tasks.status, existing.status))
+        : eq(tasks.id, taskId)
+
       const [task] = await tx
         .update(tasks)
         .set({ ...fields, ...(mergedConfig !== undefined ? { configuration: mergedConfig } : {}), updatedAt: new Date() })
-        .where(eq(tasks.id, taskId))
+        .where(whereClause)
         .returning()
+
+      if (!task) {
+        throw Object.assign(new Error("conflict"), { statusCode: 409 })
+      }
 
       if (dependencyIds !== undefined) {
         const depIds: string[] = Array.isArray(dependencyIds) ? dependencyIds : []
@@ -209,6 +225,10 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
     broadcast(projectId, { type: "task.updated", task: withAll }, userId).catch(() => {})
     res.json({ task: withAll })
   } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 409) {
+      res.status(409).json({ error: "Task was modified by someone else, please refresh" })
+      return
+    }
     console.error("[PATCH task]", err)
     res.status(500).json({ error: "Failed to update task" })
   }

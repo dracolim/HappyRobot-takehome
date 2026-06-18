@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import { COLUMNS } from "@/lib/types"
 import type { ProjectMember, Task, TaskStatus } from "@/lib/types"
+import { useProjectSocket, type PresenceUser, type SocketEvent } from "@/lib/useProjectSocket"
 import { KanbanColumn } from "./KanbanColumn"
 import { TaskModal } from "./TaskModal"
 import { TaskDetailModal, UpdatePayload } from "./TaskDetailModal"
@@ -113,6 +114,8 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [showMembers, setShowMembers] = useState(false)
+  const [presenceMap, setPresenceMap] = useState<Map<string, PresenceUser[]>>(new Map())
+  const [realtimeComments, setRealtimeComments] = useState<import("@/lib/types").Comment[]>([])
   const membersPanelRef = useRef<HTMLDivElement>(null)
 
   const currentUserId = typeof window !== "undefined"
@@ -127,6 +130,28 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     : null
 
   const isOwner = members.find((m) => m.userId === currentUserId)?.role === "owner"
+
+  const handleSocketEvent = useCallback((event: SocketEvent) => {
+    if (event.type === "task.created") {
+      setTasks((prev) => [...prev, event.task])
+    } else if (event.type === "task.updated") {
+      setTasks((prev) => prev.map((t) => (t.id === event.task.id ? event.task : t)))
+      setSelectedTask((prev) => (prev?.id === event.task.id ? event.task : prev))
+    } else if (event.type === "task.deleted") {
+      setTasks((prev) => prev.filter((t) => t.id !== event.taskId))
+      setSelectedTask((prev) => (prev?.id === event.taskId ? null : prev))
+    } else if (event.type === "comment.created") {
+      setRealtimeComments((prev) => prev.some((c) => c.id === event.comment.id) ? prev : [...prev, event.comment])
+    } else if (event.type === "presence.updated") {
+      setPresenceMap((prev) => {
+        const next = new Map(prev)
+        next.set(event.taskId, event.users.filter((u) => u.userId !== currentUserId))
+        return next
+      })
+    }
+  }, [currentUserId])
+
+  const { joinTask, leaveTask, heartbeat } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
 
   useEffect(() => {
     api.tasks
@@ -212,9 +237,20 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   }
 
   const handleSaveTask = async (taskId: string, updates: UpdatePayload) => {
-    const res = await api.tasks.update(projectId, taskId, updates as Partial<Task> & { dependencyIds?: string[] })
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? res.task : t)))
-    setSelectedTask((prev) => (prev?.id === taskId ? res.task : prev))
+    try {
+      const res = await api.tasks.update(projectId, taskId, updates as Parameters<typeof api.tasks.update>[2])
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? res.task : t)))
+      setSelectedTask((prev) => (prev?.id === taskId ? res.task : prev))
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("modified by someone else")) {
+        // refresh so the modal shows the latest version before retrying
+        api.tasks.list(projectId).then((res) => {
+          setTasks(res.tasks)
+          setSelectedTask(res.tasks.find((t) => t.id === taskId) ?? null)
+        }).catch(() => {})
+      }
+      throw err
+    }
   }
 
   const handleDeleteTask = async (taskId: string) => {
@@ -304,6 +340,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
               status={col.id}
               tasks={tasksByStatus(col.id)}
               blockingCountMap={blockingCountMap}
+              presenceMap={presenceMap}
               onAddTask={() => setModalStatus(col.id)}
               onSelectTask={(task) => setSelectedTask(task)}
             />
@@ -328,6 +365,11 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           onSave={handleSaveTask}
           onDelete={handleDeleteTask}
           onOpenTask={(t) => setSelectedTask(t)}
+          onJoinTask={joinTask}
+          onLeaveTask={leaveTask}
+          onHeartbeat={heartbeat}
+          viewers={presenceMap.get(selectedTask.id) ?? []}
+          realtimeComments={realtimeComments}
         />
       )}
     </>

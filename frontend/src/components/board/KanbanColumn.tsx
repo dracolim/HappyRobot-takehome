@@ -1,4 +1,5 @@
 import type { Task, TaskStatus } from "@/lib/types"
+import type { PresenceUser } from "@/lib/useProjectSocket"
 import { TaskCard } from "./TaskCard"
 
 const columnDot: Record<TaskStatus, string> = {
@@ -13,11 +14,12 @@ interface Props {
   status: TaskStatus
   tasks: Task[]
   blockingCountMap: Map<string, number>
+  presenceMap: Map<string, PresenceUser[]>
   onAddTask: () => void
   onSelectTask: (task: Task) => void
 }
 
-export function KanbanColumn({ label, status, tasks, blockingCountMap, onAddTask, onSelectTask }: Props) {
+export function KanbanColumn({ label, status, tasks, blockingCountMap, presenceMap, onAddTask, onSelectTask }: Props) {
   return (
     <div className="flex flex-col flex-1 min-w-0">
       <div className="flex items-center justify-between mb-3 px-1">
@@ -42,6 +44,7 @@ export function KanbanColumn({ label, status, tasks, blockingCountMap, onAddTask
             key={task.id}
             task={task}
             blockingCount={blockingCountMap.get(task.id) ?? 0}
+            viewers={presenceMap.get(task.id) ?? []}
             onClick={() => onSelectTask(task)}
           />
         ))}
