@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { api } from "@/lib/api"
 import type { Comment, Task, TaskStatus } from "@/lib/types"
+import { VALID_TRANSITIONS } from "@happyrobot/shared"
 import { TaskDag } from "./TaskDag"
 
 export interface UpdatePayload {
@@ -33,12 +34,6 @@ interface Props {
   realtimeComments: Comment[]
 }
 
-const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  todo: ["in_progress"],
-  in_progress: ["in_review", "todo"],
-  in_review: ["done", "in_progress"],
-  done: ["in_review"],
-}
 
 const statusConfig: Record<TaskStatus, { label: string; bg: string; text: string }> = {
   todo: { label: "To Do", bg: "bg-black/[0.06]", text: "text-[#0E0D0C]/60" },

@@ -1,5 +1,12 @@
 {
   "name": "happyrobot-takehome",
   "private": true,
-  "workspaces": ["shared", "backend", "frontend"]
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "dependencies": {
+    "express-rate-limit": "^8.5.2"
+  }
 }

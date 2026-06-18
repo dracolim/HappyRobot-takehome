@@ -5,6 +5,15 @@ import { z } from "zod"
 export const TaskStatusSchema = z.enum(["todo", "in_progress", "in_review", "done"])
 export const TaskPrioritySchema = z.enum(["low", "medium", "high", "urgent"])
 
+export type TaskStatus = z.infer<typeof TaskStatusSchema>
+
+export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  todo: ["in_progress"],
+  in_progress: ["in_review", "todo"],
+  in_review: ["done", "in_progress"],
+  done: ["in_review"],
+}
+
 // ── Task ─────────────────────────────────────────────────────────────────────
 
 export const TaskConfigurationSchema = z.object({
@@ -69,7 +78,6 @@ export const InviteMemberSchema = z.object({
 
 // ── Inferred TypeScript types (frontend imports these) ───────────────────────
 
-export type TaskStatus = z.infer<typeof TaskStatusSchema>
 export type TaskPriority = z.infer<typeof TaskPrioritySchema>
 export type TaskConfiguration = z.infer<typeof TaskConfigurationSchema>
 export type CreateTaskInput = z.infer<typeof CreateTaskSchema>

@@ -18,6 +18,11 @@ let publisher: Redis
 let subscriber: Redis
 let presenceRedis: Redis
 
+// backpressure: max messages per user per window
+const WS_RATE_WINDOW_MS = 10_000
+const WS_RATE_MAX = 30
+const wsMessageCounts = new Map<string, { count: number; resetAt: number }>()
+
 const PRESENCE_TTL = 30 // seconds
 const PRESENCE_KEY = (taskId: string) => `presence:${taskId}`
 
@@ -101,6 +106,17 @@ export function setupWebSocket(server: Server): void {
 
     ws.on("message", async (data) => {
       try {
+        // backpressure: drop messages exceeding rate limit
+        const now = Date.now()
+        const bucket = wsMessageCounts.get(userId) ?? { count: 0, resetAt: now + WS_RATE_WINDOW_MS }
+        if (now > bucket.resetAt) { bucket.count = 0; bucket.resetAt = now + WS_RATE_WINDOW_MS }
+        bucket.count++
+        wsMessageCounts.set(userId, bucket)
+        if (bucket.count > WS_RATE_MAX) {
+          console.warn(`[WS backpressure] user=${userId} exceeded ${WS_RATE_MAX} msgs/${WS_RATE_WINDOW_MS}ms`)
+          return
+        }
+
         console.log(`[WS in] user=${userId} project=${projectId}`, data.toString())
         const msg = JSON.parse(data.toString()) as { type: string; taskId?: string }
 

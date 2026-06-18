@@ -5,13 +5,8 @@ import { and, eq, lt, desc, inArray, count } from "drizzle-orm"
 import { broadcast } from "../ws/manager"
 import type { AuthRequest } from "../middleware/auth"
 import { CreateTaskSchema, UpdateTaskSchema } from "@happyrobot/shared"
-
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  todo: ["in_progress"],
-  in_progress: ["in_review", "todo"],
-  in_review: ["done", "in_progress"],
-  done: ["in_review"],
-}
+import type { TaskStatus } from "@happyrobot/shared"
+import { canTransition } from "../domain/task"
 
 const DEFAULT_CONFIG = {
   priority: "medium" as const,
@@ -155,8 +150,7 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
     }
 
     if (fields.status && fields.status !== existing.status) {
-      const allowed = VALID_TRANSITIONS[existing.status] ?? []
-      if (!allowed.includes(fields.status)) {
+      if (!canTransition(existing.status as TaskStatus, fields.status)) {
         res.status(422).json({
           error: `Cannot transition from '${existing.status}' to '${fields.status}'`,
         })
