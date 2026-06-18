@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useCallback } from "react"
-import type { Task, Comment } from "./types"
+import type { Task, Comment, Attachment } from "./types"
 
 export interface PresenceUser {
   userId: string
@@ -14,6 +14,8 @@ export type SocketEvent =
   | { type: "task.deleted"; taskId: string }
   | { type: "comment.created"; comment: Comment }
   | { type: "presence.updated"; taskId: string; users: PresenceUser[] }
+  | { type: "attachment.created"; taskId: string; attachment: Attachment }
+  | { type: "attachment.deleted"; taskId: string; attachmentId: string }
 
 interface Options {
   projectId: string

@@ -1,10 +1,147 @@
+/* eslint-disable @next/next/no-img-element */
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { api } from "@/lib/api"
-import type { Comment, Task, TaskStatus } from "@/lib/types"
+import type { Attachment, Comment, ProjectMember, Task, TaskStatus } from "@/lib/types"
+import { MemberPicker } from "./MemberPicker"
 import { VALID_TRANSITIONS } from "@happyrobot/shared"
 import { TaskDag } from "./TaskDag"
+import { useBlobUrl } from "@/hooks/useBlobUrl"
+
+function fileExtension(filename: string) {
+  return filename.split(".").pop()?.toUpperCase() ?? "FILE"
+}
+
+const extColors: Record<string, string> = {
+  PDF: "bg-red-50 text-red-500",
+  DOC: "bg-blue-50 text-blue-500",
+  DOCX: "bg-blue-50 text-blue-500",
+  XLS: "bg-green-50 text-green-600",
+  XLSX: "bg-green-50 text-green-600",
+  ZIP: "bg-yellow-50 text-yellow-600",
+  RAR: "bg-yellow-50 text-yellow-600",
+}
+
+function PreviewModal({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
+  const { blobUrl, loading } = useBlobUrl(attachment.id)
+  const isImage = attachment.mimeType.startsWith("image/")
+  const isPdf = attachment.mimeType === "application/pdf"
+  const canPreview = isImage || isPdf
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div className="relative w-full max-w-4xl mx-6 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <p className="text-white text-sm font-medium truncate max-w-sm">{attachment.filename}</p>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => api.attachments.download(attachment.id, attachment.filename)}
+              className="text-[11px] font-medium text-white/60 hover:text-white px-3 py-1.5 rounded-lg border border-white/20 hover:border-white/40 transition-colors"
+            >
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-white/50 hover:text-white text-xl leading-none transition-colors"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl overflow-hidden flex items-center justify-center max-h-[80vh]">
+          {loading ? (
+            <div className="w-full h-64 flex items-center justify-center">
+              <span className="text-[#0E0D0C]/30 text-sm">Loading…</span>
+            </div>
+          ) : blobUrl && isImage ? (
+            <img src={blobUrl} alt={attachment.filename} className="max-w-full max-h-[80vh] object-contain" />
+          ) : blobUrl && isPdf ? (
+            <iframe src={blobUrl} title={attachment.filename} className="w-full h-[80vh]" />
+          ) : (
+            <div className="p-12 flex flex-col items-center gap-4">
+              <span className={`text-lg font-bold px-4 py-2 rounded-xl ${extColors[fileExtension(attachment.filename)] ?? "bg-black/[0.04] text-[#0E0D0C]/40"}`}>
+                {fileExtension(attachment.filename)}
+              </span>
+              <p className="text-sm text-[#0E0D0C]/40">
+                {canPreview ? "Failed to load preview" : "Preview not available for this file type"}
+              </p>
+              <button
+                type="button"
+                onClick={() => api.attachments.download(attachment.id, attachment.filename)}
+                className="px-4 py-2 bg-[#0E0D0C] text-white rounded-lg text-sm hover:bg-black/80 transition-colors"
+              >
+                Download
+              </button>
+            </div>
+          )}
+        </div>
+
+        <p className="text-center text-white/30 text-[11px]">{formatBytes(attachment.size)}</p>
+      </div>
+    </div>
+  )
+}
+
+function AttachmentCard({ attachment, isEditing, onPreview, onDelete }: {
+  attachment: Attachment
+  isEditing: boolean
+  onPreview: (attachment: Attachment) => void
+  onDelete: (id: string) => void
+}) {
+  const isImage = attachment.mimeType.startsWith("image/")
+  const { blobUrl } = useBlobUrl(isImage ? attachment.id : null)
+
+  const ext = fileExtension(attachment.filename)
+  const extColor = extColors[ext] ?? "bg-black/[0.04] text-[#0E0D0C]/40"
+
+  return (
+    <div className="relative group rounded-xl border border-black/[0.06] overflow-hidden hover:border-black/10 transition-colors">
+      <button
+        type="button"
+        onClick={() => onPreview(attachment)}
+        className="w-full text-left cursor-pointer"
+      >
+        <div className="h-16 flex items-center justify-center bg-black/[0.02]">
+          {isImage ? (
+            blobUrl ? (
+              <img src={blobUrl} alt={attachment.filename} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-black/[0.04] animate-pulse" />
+            )
+          ) : (
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${extColor}`}>{ext}</span>
+          )}
+        </div>
+        <div className="px-2.5 py-2 border-t border-black/[0.05]">
+          <p className="text-[11px] font-medium text-[#0E0D0C]/70 truncate">{attachment.filename}</p>
+          <p className="text-[10px] text-[#0E0D0C]/30">{formatBytes(attachment.size)}</p>
+        </div>
+      </button>
+      {isEditing && (
+        <button
+          type="button"
+          onClick={() => onDelete(attachment.id)}
+          className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity leading-none hover:bg-red-500"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  )
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export interface UpdatePayload {
   title?: string
@@ -32,13 +169,17 @@ interface Props {
   onHeartbeat: (taskId: string) => void
   viewers: { userId: string; name: string }[]
   realtimeComments: Comment[]
+  onCommentPosted: (taskId: string) => void
+  realtimeAttachments: Attachment[]
+  realtimeDeletedAttachmentIds: string[]
+  members: ProjectMember[]
 }
 
 
 const statusConfig: Record<TaskStatus, { label: string; bg: string; text: string }> = {
   todo: { label: "To Do", bg: "bg-black/[0.06]", text: "text-[#0E0D0C]/60" },
   in_progress: { label: "In Progress", bg: "bg-blue-50", text: "text-blue-700" },
-  in_review: { label: "Pending", bg: "bg-amber-50", text: "text-amber-700" },
+  in_review: { label: "In Review", bg: "bg-amber-50", text: "text-amber-700" },
   done: { label: "Completed", bg: "bg-green-50", text: "text-green-700" },
 }
 
@@ -51,7 +192,7 @@ const priorityDot: Record<string, string> = {
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const
 
-export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask, onJoinTask, onLeaveTask, onHeartbeat, viewers, realtimeComments }: Props) {
+export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask, onJoinTask, onLeaveTask, onHeartbeat, viewers, realtimeComments, onCommentPosted, realtimeAttachments, realtimeDeletedAttachmentIds, members }: Props) {
   const [isEditing, setIsEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -60,15 +201,19 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   const [editDescription, setEditDescription] = useState(task.configuration.description ?? "")
   const [editTagInput, setEditTagInput] = useState("")
   const [editTags, setEditTags] = useState<string[]>(task.configuration.tags ?? [])
-  const [editAssigneeInput, setEditAssigneeInput] = useState("")
   const [editAssignedTo, setEditAssignedTo] = useState<string[]>(task.assignedTo ?? [])
   const [editDependencyIds, setEditDependencyIds] = useState<string[]>(task.dependencies ?? [])
+  const [showAllDeps, setShowAllDeps] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [transitioning, setTransitioning] = useState<TaskStatus | null>(null)
   const [commentsList, setCommentsList] = useState<Comment[]>([])
   const [commentInput, setCommentInput] = useState("")
   const [postingComment, setPostingComment] = useState(false)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
 
   const otherTasks = allTasks.filter((t) => t.id !== task.id)
@@ -84,8 +229,15 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     return [...commentsList, ...realtimeComments.filter((c) => !ids.has(c.id))]
   }, [commentsList, realtimeComments])
 
+  const allAttachments = useMemo(() => {
+    const ids = new Set(attachments.map((a) => a.id))
+    const merged = [...attachments, ...realtimeAttachments.filter((a) => !ids.has(a.id))]
+    return merged.filter((a) => !realtimeDeletedAttachmentIds.includes(a.id))
+  }, [attachments, realtimeAttachments, realtimeDeletedAttachmentIds])
+
   useEffect(() => {
     api.comments.list(task.id).then((res) => setCommentsList(res.comments)).catch(() => {})
+    api.attachments.list(task.id).then((res) => setAttachments(res.attachments)).catch(() => {})
   }, [task.id])
 
   // presence: join on open, leave on close, heartbeat every 15s
@@ -100,10 +252,14 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   }, [task.id, onHeartbeat])
 
   useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      if (previewAttachment) setPreviewAttachment(null)
+      else onClose()
+    }
     window.addEventListener("keydown", onEsc)
     return () => window.removeEventListener("keydown", onEsc)
-  }, [onClose])
+  }, [onClose, previewAttachment])
 
   const cancelEdit = () => {
     setEditTitle(task.title)
@@ -112,7 +268,6 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     setEditTags(task.configuration.tags ?? [])
     setEditTagInput("")
     setEditAssignedTo(task.assignedTo ?? [])
-    setEditAssigneeInput("")
     setEditDependencyIds(task.dependencies ?? [])
     setIsEditing(false)
   }
@@ -127,18 +282,6 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag() }
     if (e.key === "Backspace" && !editTagInput && editTags.length > 0)
       setEditTags((prev) => prev.slice(0, -1))
-  }
-
-  const addAssignee = () => {
-    const val = editAssigneeInput.trim()
-    if (val && !editAssignedTo.includes(val)) setEditAssignedTo((prev) => [...prev, val])
-    setEditAssigneeInput("")
-  }
-
-  const handleAssigneeKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addAssignee() }
-    if (e.key === "Backspace" && !editAssigneeInput && editAssignedTo.length > 0)
-      setEditAssignedTo((prev) => prev.slice(0, -1))
   }
 
   const toggleDep = (id: string) => {
@@ -200,18 +343,43 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
       await api.comments.create(task.id, text)
       const res = await api.comments.list(task.id)
       setCommentsList(res.comments)
+      onCommentPosted(task.id)
       setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50)
     } finally {
       setPostingComment(false)
     }
   }
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ""
+    setUploading(true)
+    try {
+      const res = await api.attachments.upload(task.id, file)
+      setAttachments((prev) => [...prev, res.attachment])
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    await api.attachments.delete(attachmentId)
+    setAttachments((prev) => prev.filter((a) => a.id !== attachmentId))
+  }
+
+
+
   return (
+    <>
+    {previewAttachment && (
+      <PreviewModal attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
+    )}
     <div
       className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[700px] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-6xl h-[85vh] flex flex-col">
 
         {/* Header — full width */}
         <div className="px-6 pt-6 pb-4 border-b border-black/[0.06] shrink-0">
@@ -357,7 +525,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                         onClick={() => !isBlocked && handleTransition(s)}
                         disabled={transitioning !== null || isBlocked}
                         title={isBlocked ? `Blocked by: ${blockingTasks.map((t) => t.title).join(", ")}` : undefined}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${sc.bg} ${sc.text} border-current/20 hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed`}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${sc.bg} ${sc.text} border-current/20 hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed`}
                       >
                         {transitioning === s ? "Moving…" : sc.label}
                       </button>
@@ -419,7 +587,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   placeholder="Add a description..."
-                  rows={3}
+                  rows={6}
                   className="w-full text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none resize-none border border-black/[0.06] rounded-lg px-3 py-2.5 focus:border-black/20 transition-colors"
                 />
               ) : (
@@ -435,29 +603,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                 Assigned To
               </p>
               {isEditing ? (
-                <div className="flex flex-wrap gap-1.5 items-center min-h-[38px] px-3 py-2 border border-black/[0.06] rounded-lg focus-within:border-black/20 transition-colors">
-                  {editAssignedTo.map((person) => (
-                    <span key={person} className="flex items-center gap-1 text-xs px-2 py-0.5 bg-[#0E0D0C] text-white rounded-md">
-                      {person}
-                      <button
-                        type="button"
-                        onClick={() => setEditAssignedTo((prev) => prev.filter((a) => a !== person))}
-                        className="text-white/50 hover:text-white leading-none"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    type="text"
-                    value={editAssigneeInput}
-                    onChange={(e) => setEditAssigneeInput(e.target.value)}
-                    onKeyDown={handleAssigneeKeyDown}
-                    onBlur={addAssignee}
-                    placeholder={editAssignedTo.length === 0 ? "Add assignees, press Enter…" : ""}
-                    className="flex-1 min-w-24 text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none bg-transparent"
-                  />
-                </div>
+                <MemberPicker members={members} selected={editAssignedTo} onChange={setEditAssignedTo} />
               ) : task.assignedTo.length === 0 ? (
                 <p className="text-sm italic text-[#0E0D0C]/25">Unassigned</p>
               ) : (
@@ -549,11 +695,14 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                         })}
                       </div>
                     )}
-                    {otherTasks.filter((t) => !editDependencyIds.includes(t.id)).length > 0 && (
-                      <div className="border border-dashed border-black/[0.1] rounded-xl overflow-hidden divide-y divide-black/[0.04]">
-                        {otherTasks
-                          .filter((t) => !editDependencyIds.includes(t.id))
-                          .map((t) => {
+                    {(() => {
+                      const available = otherTasks.filter((t) => !editDependencyIds.includes(t.id))
+                      const visible = showAllDeps ? available : available.slice(0, 5)
+                      const hiddenCount = available.length - 5
+                      if (available.length === 0) return null
+                      return (
+                        <div className="border border-dashed border-black/[0.1] rounded-xl overflow-hidden divide-y divide-black/[0.04]">
+                          {visible.map((t) => {
                             const sc = statusConfig[t.status]
                             return (
                               <button
@@ -571,17 +720,100 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                               </button>
                             )
                           })}
-                      </div>
-                    )}
+                          {hiddenCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAllDeps(true)}
+                              className="w-full px-3 py-2 text-[11px] text-[#0E0D0C]/35 hover:text-[#0E0D0C]/60 hover:bg-black/[0.02] transition-colors text-left"
+                            >
+                              Show {hiddenCount} more…
+                            </button>
+                          )}
+                          {showAllDeps && available.length > 5 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAllDeps(false)}
+                              className="w-full px-3 py-2 text-[11px] text-[#0E0D0C]/35 hover:text-[#0E0D0C]/60 hover:bg-black/[0.02] transition-colors text-left"
+                            >
+                              Show less
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               )
             ) : (
               <TaskDag task={task} allTasks={allTasks} onOpenTask={onOpenTask} />
             )}
+
+            {/* Attachments */}
+            {(allAttachments.length > 0 || isEditing) && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#0E0D0C]">
+                    Attachments{allAttachments.length > 0 && (
+                      <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-black/5 text-[#0E0D0C]/50 normal-case tracking-normal">
+                        {allAttachments.length}
+                      </span>
+                    )}
+                  </p>
+                  {isEditing && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="text-[10px] font-medium text-[#0E0D0C]/40 hover:text-[#0E0D0C]/70 disabled:opacity-40 transition-colors"
+                      >
+                        {uploading ? "Uploading…" : "+ Upload"}
+                      </button>
+                      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
+                    </>
+                  )}
+                </div>
+                {allAttachments.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-black/[0.08] rounded-xl py-4 text-xs text-[#0E0D0C]/30 hover:border-black/20 hover:text-[#0E0D0C]/50 transition-colors"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    </svg>
+                    Attach a file
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2">
+                    {allAttachments.map((a) => (
+                      <AttachmentCard
+                        key={a.id}
+                        attachment={a}
+                        isEditing={isEditing}
+                        onPreview={setPreviewAttachment}
+                        onDelete={handleDeleteAttachment}
+                      />
+                    ))}
+                    {isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="h-full min-h-[80px] flex flex-col items-center justify-center gap-1.5 border-2 border-dashed border-black/[0.08] rounded-xl text-[10px] text-[#0E0D0C]/30 hover:border-black/20 hover:text-[#0E0D0C]/50 transition-colors"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                          <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                        </svg>
+                        Add file
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Right — comments panel */}
+          {/* Right — comments + files panel */}
           <div className="w-72 shrink-0 flex flex-col">
             {/* Comments header */}
             <div className="px-5 py-4 border-b border-black/[0.06] shrink-0">
@@ -651,5 +883,6 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
         </div>
       </div>
     </div>
+    </>
   )
 }

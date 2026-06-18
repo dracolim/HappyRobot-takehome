@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import type { Task, TaskStatus } from "@/lib/types"
+import type { ProjectMember, Task, TaskStatus } from "@/lib/types"
+import { MemberPicker } from "./MemberPicker"
 
 interface TaskFormData {
   title: string
@@ -10,11 +11,13 @@ interface TaskFormData {
   tags: string[]
   assignedTo: string[]
   dependencyIds: string[]
+  files: File[]
 }
 
 interface Props {
   status: TaskStatus
   existingTasks: Task[]
+  members: ProjectMember[]
   onClose: () => void
   onSubmit: (data: TaskFormData) => void
 }
@@ -31,19 +34,21 @@ const priorityDot: Record<string, string> = {
 const statusLabel: Record<TaskStatus, string> = {
   todo: "To Do",
   in_progress: "In Progress",
-  in_review: "Pending",
+  in_review: "In Review",
   done: "Completed",
 }
 
-export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
+export function TaskModal({ status, existingTasks, members, onClose, onSubmit }: Props) {
   const [title, setTitle] = useState("")
   const [priority, setPriority] = useState<TaskFormData["priority"]>("medium")
   const [description, setDescription] = useState("")
   const [tagInput, setTagInput] = useState("")
   const [tags, setTags] = useState<string[]>([])
-  const [assigneeInput, setAssigneeInput] = useState("")
   const [assignedTo, setAssignedTo] = useState<string[]>([])
   const [dependencyIds, setDependencyIds] = useState<string[]>([])
+  const [showAllDeps, setShowAllDeps] = useState(false)
+  const [files, setFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -68,28 +73,25 @@ export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
       setTags((prev) => prev.slice(0, -1))
   }
 
-  const addAssignee = () => {
-    const val = assigneeInput.trim()
-    if (val && !assignedTo.includes(val)) setAssignedTo((prev) => [...prev, val])
-    setAssigneeInput("")
-  }
-
-  const handleAssigneeKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addAssignee() }
-    if (e.key === "Backspace" && !assigneeInput && assignedTo.length > 0)
-      setAssignedTo((prev) => prev.slice(0, -1))
-  }
-
   const toggleDep = (id: string) => {
     setDependencyIds((prev) =>
       prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
     )
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? [])
+    setFiles((prev) => {
+      const existing = new Set(prev.map((f) => f.name))
+      return [...prev, ...selected.filter((f) => !existing.has(f.name))]
+    })
+    e.target.value = ""
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
-    onSubmit({ title: title.trim(), priority, description, tags, assignedTo, dependencyIds })
+    onSubmit({ title: title.trim(), priority, description, tags, assignedTo, dependencyIds, files })
   }
 
   return (
@@ -120,7 +122,7 @@ export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
           />
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5 overflow-y-auto thin-scroll">
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#0E0D0C]/30 mb-2">
               Priority
@@ -161,32 +163,7 @@ export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#0E0D0C]/30 mb-2">
               Assigned To
             </label>
-            <div className="flex flex-wrap gap-1.5 items-center min-h-[38px] px-3 py-2 border border-black/[0.06] rounded-lg focus-within:border-black/20 transition-colors">
-              {assignedTo.map((person) => (
-                <span
-                  key={person}
-                  className="flex items-center gap-1 text-xs px-2 py-0.5 bg-[#0E0D0C] text-white rounded-md"
-                >
-                  {person}
-                  <button
-                    type="button"
-                    onClick={() => setAssignedTo((prev) => prev.filter((a) => a !== person))}
-                    className="text-white/50 hover:text-white leading-none"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <input
-                type="text"
-                value={assigneeInput}
-                onChange={(e) => setAssigneeInput(e.target.value)}
-                onKeyDown={handleAssigneeKeyDown}
-                onBlur={addAssignee}
-                placeholder={assignedTo.length === 0 ? "Add assignees, press Enter…" : ""}
-                className="flex-1 min-w-24 text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none bg-transparent"
-              />
-            </div>
+            <MemberPicker members={members} selected={assignedTo} onChange={setAssignedTo} />
           </div>
 
           <div>
@@ -226,8 +203,8 @@ export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#0E0D0C]/30 mb-2">
                 Dependencies
               </label>
-              <div className="border border-black/[0.06] rounded-lg overflow-hidden divide-y divide-black/[0.04] max-h-36 overflow-y-auto">
-                {existingTasks.map((t) => (
+              <div className="border border-black/[0.06] rounded-lg overflow-hidden divide-y divide-black/[0.04]">
+                {(showAllDeps ? existingTasks : existingTasks.slice(0, 5)).map((t) => (
                   <label
                     key={t.id}
                     className="flex items-center gap-3 px-3 py-2 hover:bg-black/[0.02] cursor-pointer"
@@ -244,9 +221,52 @@ export function TaskModal({ status, existingTasks, onClose, onSubmit }: Props) {
                     </span>
                   </label>
                 ))}
+                {existingTasks.length > 5 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllDeps((v) => !v)}
+                    className="w-full px-3 py-2 text-left text-[11px] text-[#0E0D0C]/40 hover:text-[#0E0D0C]/60 hover:bg-black/[0.02] transition-colors"
+                  >
+                    {showAllDeps
+                      ? "Show less"
+                      : `Show ${existingTasks.length - 5} more…`}
+                  </button>
+                )}
               </div>
             </div>
           )}
+
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#0E0D0C]/30 mb-2">
+              Attachments
+            </label>
+            <div className="flex flex-col gap-1.5">
+              {files.map((f) => (
+                <div key={f.name} className="flex items-center gap-2 px-3 py-1.5 border border-black/[0.06] rounded-lg">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0 text-[#0E0D0C]/30">
+                    <path d="M7 1H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4L7 1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                    <path d="M7 1v3h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span className="text-xs text-[#0E0D0C]/60 flex-1 truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFiles((prev) => prev.filter((x) => x.name !== f.name))}
+                    className="text-[#0E0D0C]/20 hover:text-red-400 transition-colors leading-none shrink-0"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-dashed border-black/15 rounded-lg text-xs text-[#0E0D0C]/40 hover:text-[#0E0D0C]/60 hover:border-black/25 transition-colors"
+              >
+                <span>+ Attach files</span>
+              </button>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileChange} />
+            </div>
+          </div>
 
           <div className="flex gap-3 pt-1">
             <button

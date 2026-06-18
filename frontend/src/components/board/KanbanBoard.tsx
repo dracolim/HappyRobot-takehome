@@ -118,6 +118,8 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   const [showMembers, setShowMembers] = useState(false)
   const [presenceMap, setPresenceMap] = useState<Map<string, PresenceUser[]>>(new Map())
   const [realtimeComments, setRealtimeComments] = useState<import("@/lib/types").Comment[]>([])
+  const [realtimeAttachments, setRealtimeAttachments] = useState<import("@/lib/types").Attachment[]>([])
+  const [realtimeDeletedAttachmentIds, setRealtimeDeletedAttachmentIds] = useState<string[]>([])
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [dragError, setDragError] = useState<string | null>(null)
   const membersPanelRef = useRef<HTMLDivElement>(null)
@@ -149,6 +151,12 @@ export function KanbanBoard({ projectId, projectName }: Props) {
       setTasks((prev) => prev.map((t) =>
         t.id === event.comment.taskId ? { ...t, commentCount: (t.commentCount ?? 0) + 1 } : t
       ))
+    } else if (event.type === "attachment.created") {
+      setRealtimeAttachments((prev) => prev.some((a) => a.id === event.attachment.id) ? prev : [...prev, event.attachment])
+      setTasks((prev) => prev.map((t) => t.id === event.taskId ? { ...t, attachmentCount: (t.attachmentCount ?? 0) + 1 } : t))
+    } else if (event.type === "attachment.deleted") {
+      setRealtimeDeletedAttachmentIds((prev) => [...prev, event.attachmentId])
+      setTasks((prev) => prev.map((t) => t.id === event.taskId ? { ...t, attachmentCount: Math.max(0, (t.attachmentCount ?? 0) - 1) } : t))
     } else if (event.type === "presence.updated") {
       setPresenceMap((prev) => {
         const next = new Map(prev)
@@ -220,6 +228,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
       },
       dependencies: data.dependencyIds,
       commentCount: 0,
+      attachmentCount: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -447,6 +456,8 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           viewers={presenceMap.get(selectedTask.id) ?? []}
           realtimeComments={realtimeComments}
           onCommentPosted={handleCommentPosted}
+          realtimeAttachments={realtimeAttachments.filter((a) => a.taskId === selectedTask.id)}
+          realtimeDeletedAttachmentIds={realtimeDeletedAttachmentIds}
           members={members}
         />
       )}
