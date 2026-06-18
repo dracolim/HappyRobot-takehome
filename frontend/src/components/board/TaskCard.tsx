@@ -51,6 +51,7 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
   const tags = task.configuration.tags ?? []
   const depCount = (task.dependencies?.length ?? 0) + blockingCount
   const commentCount = task.commentCount ?? 0
+  const attachmentCount = task.attachmentCount ?? 0
   const pc = priorityConfig[priority] ?? priorityConfig.medium
   const sc = statusColors[task.status]
   const hasViewers = viewers.length > 0
@@ -129,6 +130,14 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
                 <path d="M10 1H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1.5L6 11l2.5-2H10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
               </svg>
               {commentCount}
+            </span>
+          )}
+          {attachmentCount > 0 && (
+            <span className="flex items-center gap-1 text-[11px] text-[#0E0D0C]/35">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0">
+                <path d="M9.5 6.5L5 11A3 3 0 0 1 .757 6.757L5.5 2a2 2 0 0 1 2.828 2.828L3.914 9.243a1 1 0 0 1-1.414-1.414L7 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {attachmentCount}
             </span>
           )}
         </div>

@@ -1,5 +1,5 @@
 import type { RegisterInput, LoginInput, CreateProjectInput, CreateTaskInput, UpdateTaskInput, InviteMemberInput } from "@happyrobot/shared"
-import type { Project, Task, Comment, ProjectMember } from "./types"
+import type { Project, Task, Comment, ProjectMember, Attachment } from "./types"
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
 
@@ -95,5 +95,42 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ content }),
       }),
+  },
+  attachments: {
+    list: (taskId: string) =>
+      request<{ attachments: Attachment[] }>(`/api/tasks/${taskId}/attachments`),
+    upload: async (taskId: string, file: File): Promise<{ attachment: Attachment }> => {
+      const token = getToken()
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${BASE_URL}/api/tasks/${taskId}/attachments`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(err.error ?? "Upload failed")
+      }
+      return res.json()
+    },
+    fetchBlobUrl: async (attachmentId: string): Promise<string> => {
+      const token = getToken()
+      const res = await fetch(`${BASE_URL}/api/attachments/${attachmentId}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error("Failed to fetch")
+      return URL.createObjectURL(await res.blob())
+    },
+    download: async (attachmentId: string, filename: string): Promise<void> => {
+      const url = await api.attachments.fetchBlobUrl(attachmentId)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    },
+    delete: (attachmentId: string) =>
+      request<void>(`/api/attachments/${attachmentId}`, { method: "DELETE" }),
   },
 }

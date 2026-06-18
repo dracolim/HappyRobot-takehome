@@ -10,6 +10,7 @@ export interface Task {
   configuration: TaskConfiguration
   dependencies: string[]
   commentCount: number
+  attachmentCount: number
   createdAt: string
   updatedAt: string
 }
@@ -39,6 +40,16 @@ export interface User {
   name: string
   createdAt: string
   updatedAt: string
+}
+
+export interface Attachment {
+  id: string
+  taskId: string
+  uploaderId: string
+  filename: string
+  size: number
+  mimeType: string
+  createdAt: string
 }
 
 export interface ProjectMember {

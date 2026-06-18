@@ -31,12 +31,7 @@ const columnIcon: Record<TaskStatus, React.ReactNode> = {
   ),
 }
 
-const columnColor: Record<TaskStatus, string> = {
-  todo: "text-[#0E0D0C]/40",
-  in_progress: "text-[#0E0D0C]/40",
-  in_review: "text-[#0E0D0C]/40",
-  done: "text-[#0E0D0C]/40",
-}
+const columnIconColor = "text-[#0E0D0C]/40"
 
 interface Props {
   label: string
@@ -56,7 +51,7 @@ export function KanbanColumn({ label, status, tasks, blockingCountMap, presenceM
     <div ref={setNodeRef} className="flex flex-col flex-1 min-w-0">
       <div className="flex items-center justify-between mb-4 px-1">
         <div className="flex items-center gap-2">
-          <span className={columnColor[status]}>{columnIcon[status]}</span>
+          <span className={columnIconColor}>{columnIcon[status]}</span>
           <span className="text-sm font-semibold text-[#0E0D0C]/70 uppercase tracking-wider">{label}</span>
           <span className="text-xs font-medium px-1.5 py-0.5 rounded-md bg-black/5 text-[#0E0D0C]/50">
             {tasks.length}
