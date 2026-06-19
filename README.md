@@ -75,14 +75,14 @@ The task description uses Yjs CRDT. Multiple users can type simultaneously and e
 **Activity feed with real-time notifications**
 Every task mutation is written to an append-only `events` table and broadcast as a socket event. The sidebar feed updates live and shows exactly what changed: `moved from To Do → In Review`, `renamed "Old" → "New"`.
 
-<img width="323" height="600" alt="Screenshot 2026-06-19 at 9 32 20 AM" src="https://github.com/user-attachments/assets/93787220-80f6-44a3-bfdf-b2022a6bdcd5" />
+<img width="323" height="500" alt="Screenshot 2026-06-19 at 9 32 20 AM" src="https://github.com/user-attachments/assets/93787220-80f6-44a3-bfdf-b2022a6bdcd5" />
 
 
 **@mentions with notifications**
 `@name` patterns in comments are parsed on the backend. Mentioned members receive an in-app notification over WebSocket, persisted in the `notifications` table across sessions.
 <br/>
-<img width="423" height="500" alt="Screenshot 2026-06-19 at 9 32 05 AM" src="https://github.com/user-attachments/assets/1639459b-27a5-412e-970c-209118515267" />
-<img width="433" height="148" alt="Screenshot 2026-06-19 at 9 31 38 AM" src="https://github.com/user-attachments/assets/c56176a0-f4d3-46fb-88ff-dd5f8136e709" />
+<img width="400" height="600" alt="Screenshot 2026-06-19 at 9 32 05 AM" src="https://github.com/user-attachments/assets/1639459b-27a5-412e-970c-209118515267" />
+<img width="400" height="150" alt="Screenshot 2026-06-19 at 9 31 38 AM" src="https://github.com/user-attachments/assets/c56176a0-f4d3-46fb-88ff-dd5f8136e709" />
 
 
 ### Option 4 — Open-Ended Extension
@@ -102,9 +102,7 @@ Tasks declare dependencies on other tasks, rendered as a directed acyclic graph.
 <img width="750" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
 
 **Container Diagram**
-Information on how the systems are interacting with one another<img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/5af14d42-1a1b-4e4f-9216-f171264fafc3" />
-<img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/9c3a07e9-5119-4ff1-94bc-ef3070876c2e" />
-
+Information on how the systems are interacting with one another
 <img width="646" height="779" alt="image" src="https://github.com/user-attachments/assets/0e6891e8-d28e-42f0-a145-4b362fffde77" />
 
 
