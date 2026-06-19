@@ -73,6 +73,38 @@ const INIT_SQL = `
   CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id, created_at);
 
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0;
+
+  CREATE TABLE IF NOT EXISTS events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+    user_id UUID NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}',
+    revision INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_events_task_revision ON events(task_id, revision);
+  CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+    comment_id UUID REFERENCES comments(id) ON DELETE CASCADE,
+    from_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    body TEXT NOT NULL,
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read) WHERE NOT read;
+
   INSERT INTO project_members (project_id, user_id, role)
   SELECT id, owner_id, 'owner' FROM projects
   ON CONFLICT DO NOTHING;

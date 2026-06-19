@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core"
+import { pgTable, uuid, text, timestamp, jsonb, primaryKey, bigint, integer, boolean } from "drizzle-orm/pg-core"
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -42,6 +42,7 @@ export const tasks = pgTable("tasks", {
       customFields: Record<string, unknown>
     }>()
     .notNull(),
+  revision: integer("revision").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 })
@@ -65,6 +66,20 @@ export const comments = pgTable("comments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 })
 
+export const events = pgTable("events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  type: text("type").notNull(),
+  payload: jsonb("payload")
+    .$type<{ before?: Record<string, unknown>; after?: Record<string, unknown> }>()
+    .notNull()
+    .default({}),
+  revision: integer("revision"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
 export const attachments = pgTable("attachments", {
   id: uuid("id").defaultRandom().primaryKey(),
   taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }).notNull(),
@@ -74,4 +89,17 @@ export const attachments = pgTable("attachments", {
   size: bigint("size", { mode: "number" }).notNull(),
   mimeType: text("mime_type").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+  commentId: uuid("comment_id").references(() => comments.id, { onDelete: "cascade" }),
+  fromUserId: uuid("from_user_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  read: boolean("read").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })

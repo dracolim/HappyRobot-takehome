@@ -62,6 +62,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-changeme_in_production}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-attachments}
