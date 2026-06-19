@@ -71,7 +71,7 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
             {viewers.slice(0, 3).map((v) => (
               <div
                 key={v.userId}
-                title={`${v.name} is viewing`}
+                title={`${v.name} is ${v.mode === "editing" ? "editing" : "viewing"}`}
                 className="w-5 h-5 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center text-[8px] font-bold text-white shrink-0"
               >
                 {v.name[0]?.toUpperCase()}
@@ -79,7 +79,15 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
             ))}
           </div>
           <span className="text-[10px] text-blue-500 font-medium">
-            {viewers.length === 1 ? `${viewers[0].name} is viewing` : `${viewers.length} viewing`}
+            {viewers.length === 1
+              ? `${viewers[0].name} is ${viewers[0].mode === "editing" ? "editing" : "viewing"}`
+              : (() => {
+                  const editors = viewers.filter(v => v.mode === "editing")
+                  if (editors.length === viewers.length) return `${viewers.length} editing`
+                  if (editors.length === 0) return `${viewers.length} viewing`
+                  return `${editors.length} editing, ${viewers.length - editors.length} viewing`
+                })()
+            }
           </span>
         </div>
       )}

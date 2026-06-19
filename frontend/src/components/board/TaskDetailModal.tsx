@@ -2,12 +2,16 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useForm } from "react-hook-form"
 import { api } from "@/lib/api"
-import type { Attachment, Comment, ProjectMember, Task, TaskStatus } from "@/lib/types"
+import type { Attachment, Comment, ProjectMember, Task, TaskPriority, TaskStatus } from "@/lib/types"
 import { MemberPicker } from "./MemberPicker"
 import { VALID_TRANSITIONS } from "@happyrobot/shared"
 import { TaskDag } from "./TaskDag"
 import { useBlobUrl } from "@/hooks/useBlobUrl"
+import { useYjs } from "@/lib/useYjs"
+import { CollaborativeCursors } from "./CollaborativeCursors"
+import type { PresenceUser, SocketEvent } from "@/lib/useProjectSocket"
 
 function fileExtension(filename: string) {
   return filename.split(".").pop()?.toUpperCase() ?? "FILE"
@@ -148,7 +152,6 @@ export interface UpdatePayload {
   status?: TaskStatus
   assignedTo?: string[]
   dependencyIds?: string[]
-  updatedAt?: string
   configuration?: {
     priority?: "low" | "medium" | "high" | "urgent"
     description?: string
@@ -167,12 +170,16 @@ interface Props {
   onJoinTask: (taskId: string) => void
   onLeaveTask: (taskId: string) => void
   onHeartbeat: (taskId: string) => void
-  viewers: { userId: string; name: string }[]
+  sendRaw: (msg: object) => void
+  onRegisterYjsHandler: (handler: ((e: SocketEvent) => void) | null) => void
+  viewers: PresenceUser[]
   realtimeComments: Comment[]
   onCommentPosted: (taskId: string) => void
   realtimeAttachments: Attachment[]
   realtimeDeletedAttachmentIds: string[]
   members: ProjectMember[]
+  onAttachmentUploaded: (taskId: string) => void
+  onAttachmentDeleted: (taskId: string) => void
 }
 
 
@@ -192,21 +199,40 @@ const priorityDot: Record<string, string> = {
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const
 
-export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask, onJoinTask, onLeaveTask, onHeartbeat, viewers, realtimeComments, onCommentPosted, realtimeAttachments, realtimeDeletedAttachmentIds, members }: Props) {
+export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onOpenTask, onJoinTask, onLeaveTask, onHeartbeat, sendRaw, onRegisterYjsHandler, viewers, realtimeComments, onCommentPosted, realtimeAttachments, realtimeDeletedAttachmentIds, members, onAttachmentUploaded, onAttachmentDeleted }: Props) {
   const [isEditing, setIsEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [editTitle, setEditTitle] = useState(task.title)
-  const [editPriority, setEditPriority] = useState(task.configuration.priority)
-  const [editDescription, setEditDescription] = useState(task.configuration.description ?? "")
   const [editTagInput, setEditTagInput] = useState("")
-  const [editTags, setEditTags] = useState<string[]>(task.configuration.tags ?? [])
-  const [editAssignedTo, setEditAssignedTo] = useState<string[]>(task.assignedTo ?? [])
-  const [editDependencyIds, setEditDependencyIds] = useState<string[]>(task.dependencies ?? [])
   const [showAllDeps, setShowAllDeps] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [transitioning, setTransitioning] = useState<TaskStatus | null>(null)
+
+  type FormValues = {
+    title: string
+    priority: TaskPriority
+    tags: string[]
+    assignedTo: string[]
+    dependencyIds: string[]
+    status: TaskStatus
+  }
+
+  const form = useForm<FormValues>({
+    defaultValues: {
+      title: task.title,
+      priority: task.configuration.priority,
+      tags: task.configuration.tags ?? [],
+      assignedTo: task.assignedTo ?? [],
+      dependencyIds: task.dependencies ?? [],
+      status: task.status,
+    },
+  })
+  const { register, handleSubmit, watch, setValue, reset } = form
+  const watchedStatus = watch("status")
+  const watchedPriority = watch("priority")
+  const watchedTags = watch("tags")
+  const watchedAssignedTo = watch("assignedTo")
+  const watchedDependencyIds = watch("dependencyIds")
   const [commentsList, setCommentsList] = useState<Comment[]>([])
   const [commentInput, setCommentInput] = useState("")
   const [postingComment, setPostingComment] = useState(false)
@@ -215,6 +241,33 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  const currentUserId = typeof window !== "undefined"
+    ? (() => { try { return (JSON.parse(localStorage.getItem("currentUser") ?? "null") as { id?: string } | null)?.id ?? "" } catch { return "" } })()
+    : ""
+
+  const { content: yjsDescription, onChange: onYjsDescriptionChange, onCursorMove, cursorPeers, revertContent } = useYjs({
+    taskId: task.id,
+    initialContent: task.configuration.description ?? "",
+    userId: currentUserId,
+    enabled: isEditing,
+    sendRaw,
+    onRegisterYjsHandler,
+    textareaRef: descriptionRef,
+  })
+
+  // Sync form when task prop changes (e.g. another user saved)
+  useEffect(() => {
+    reset({
+      title: task.title,
+      priority: task.configuration.priority,
+      tags: task.configuration.tags ?? [],
+      assignedTo: task.assignedTo ?? [],
+      dependencyIds: task.dependencies ?? [],
+      status: task.status,
+    })
+  }, [task]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const otherTasks = allTasks.filter((t) => t.id !== task.id)
   const validTransitions = VALID_TRANSITIONS[task.status] ?? []
@@ -246,6 +299,24 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     return () => onLeaveTask(task.id)
   }, [task.id, onJoinTask, onLeaveTask])
 
+  // broadcast edit mode to other viewers
+  useEffect(() => {
+    sendRaw({ type: "presence.mode", taskId: task.id, mode: isEditing ? "editing" : "viewing" })
+  }, [isEditing, task.id, sendRaw])
+
+  // re-announce presence on WS reconnect — the server's in-memory client is fresh
+  // after a reconnect and has no record of which task we're in or our edit mode
+  const isEditingRef = useRef(isEditing)
+  useEffect(() => { isEditingRef.current = isEditing }, [isEditing])
+  useEffect(() => {
+    const resync = () => {
+      onJoinTask(task.id)
+      sendRaw({ type: "presence.mode", taskId: task.id, mode: isEditingRef.current ? "editing" : "viewing" })
+    }
+    window.addEventListener("ws:reconnected", resync)
+    return () => window.removeEventListener("ws:reconnected", resync)
+  }, [task.id, onJoinTask, sendRaw])
+
   useEffect(() => {
     const id = setInterval(() => onHeartbeat(task.id), 15_000)
     return () => clearInterval(id)
@@ -262,63 +333,59 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   }, [onClose, previewAttachment])
 
   const cancelEdit = () => {
-    setEditTitle(task.title)
-    setEditPriority(task.configuration.priority)
-    setEditDescription(task.configuration.description ?? "")
-    setEditTags(task.configuration.tags ?? [])
+    // Revert Yjs doc to last-saved description BEFORE clearing isEditing,
+    // so the revert delta is still broadcast to collaborators.
+    revertContent(task.configuration.description ?? "")
+    reset()
     setEditTagInput("")
-    setEditAssignedTo(task.assignedTo ?? [])
-    setEditDependencyIds(task.dependencies ?? [])
     setIsEditing(false)
   }
 
   const addTag = () => {
     const tag = editTagInput.trim().replace(/,$/, "")
-    if (tag && !editTags.includes(tag)) setEditTags((prev) => [...prev, tag])
+    if (tag && !watchedTags.includes(tag)) setValue("tags", [...watchedTags, tag])
     setEditTagInput("")
   }
 
   const handleTagKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag() }
-    if (e.key === "Backspace" && !editTagInput && editTags.length > 0)
-      setEditTags((prev) => prev.slice(0, -1))
+    if (e.key === "Backspace" && !editTagInput && watchedTags.length > 0)
+      setValue("tags", watchedTags.slice(0, -1))
   }
 
   const toggleDep = (id: string) => {
-    setEditDependencyIds((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
+    setValue("dependencyIds", watchedDependencyIds.includes(id)
+      ? watchedDependencyIds.filter((d) => d !== id)
+      : [...watchedDependencyIds, id]
     )
   }
 
-  const handleTransition = async (newStatus: TaskStatus) => {
+  const stageStatus = (newStatus: TaskStatus) => {
+    setValue("status", newStatus)
+    setIsEditing(true)
     setSaveError(null)
-    setTransitioning(newStatus)
-    try {
-      await onSave(task.id, { status: newStatus, updatedAt: task.updatedAt })
-      onClose()
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to update")
-    } finally {
-      setTransitioning(null)
-    }
   }
 
-  const handleSave = async () => {
+  const onSubmit = async (data: FormValues) => {
+    const updates: UpdatePayload = {}
+
+    if (data.status !== task.status) updates.status = data.status
+    if (data.title !== task.title) updates.title = data.title
+    if (JSON.stringify(data.assignedTo) !== JSON.stringify(task.assignedTo ?? [])) updates.assignedTo = data.assignedTo
+    if (JSON.stringify(data.dependencyIds) !== JSON.stringify(task.dependencies ?? [])) updates.dependencyIds = data.dependencyIds
+
+    const config: UpdatePayload["configuration"] = {}
+    if (data.priority !== task.configuration.priority) config.priority = data.priority
+    if (yjsDescription !== (task.configuration.description ?? "")) config.description = yjsDescription
+    if (JSON.stringify(data.tags) !== JSON.stringify(task.configuration.tags ?? [])) config.tags = data.tags
+    if (Object.keys(config).length > 0) updates.configuration = config
+
+    if (Object.keys(updates).length === 0) { setIsEditing(false); return }
+
     setSaveError(null)
     setSaving(true)
     try {
-      await onSave(task.id, {
-        title: editTitle,
-        assignedTo: editAssignedTo,
-        dependencyIds: editDependencyIds,
-        updatedAt: task.updatedAt,
-        configuration: {
-          priority: editPriority,
-          description: editDescription,
-          tags: editTags,
-          customFields: task.configuration.customFields,
-        },
-      })
+      await onSave(task.id, updates)
       setIsEditing(false)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save")
@@ -344,6 +411,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
       const res = await api.comments.list(task.id)
       setCommentsList(res.comments)
       onCommentPosted(task.id)
+      window.dispatchEvent(new CustomEvent("app:activityRefresh"))
       setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50)
     } finally {
       setPostingComment(false)
@@ -358,6 +426,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     try {
       const res = await api.attachments.upload(task.id, file)
       setAttachments((prev) => [...prev, res.attachment])
+      onAttachmentUploaded(task.id)
     } finally {
       setUploading(false)
     }
@@ -366,6 +435,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   const handleDeleteAttachment = async (attachmentId: string) => {
     await api.attachments.delete(attachmentId)
     setAttachments((prev) => prev.filter((a) => a.id !== attachmentId))
+    onAttachmentDeleted(task.id)
   }
 
 
@@ -402,8 +472,8 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                   </button>
                   <button
                     type="button"
-                    onClick={handleSave}
-                    disabled={saving || !editTitle.trim()}
+                    onClick={handleSubmit(onSubmit)}
+                    disabled={saving || !watch("title")?.trim()}
                     className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-[#0E0D0C] text-white rounded-lg hover:bg-black/80 disabled:opacity-40 transition-colors"
                   >
                     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
@@ -469,8 +539,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
             <input
               autoFocus
               type="text"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
+              {...register("title")}
               className="w-full text-xl font-semibold text-[#0E0D0C] outline-none"
             />
           ) : (
@@ -484,13 +553,22 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
             <div className="flex -space-x-1">
               {viewers.slice(0, 3).map((v) => (
-                <div key={v.userId} title={v.name} className="w-5 h-5 rounded-full bg-blue-500 border-2 border-blue-50 flex items-center justify-center text-[8px] font-bold text-white">
+                <div key={v.userId} title={`${v.name} · ${v.mode === "editing" ? "editing" : "viewing"}`} className="w-5 h-5 rounded-full bg-blue-500 border-2 border-blue-50 flex items-center justify-center text-[8px] font-bold text-white">
                   {v.name[0]?.toUpperCase()}
                 </div>
               ))}
             </div>
             <span className="text-xs text-blue-600">
-              {viewers.length === 1 ? `${viewers[0].name} is also viewing` : `${viewers.length} others are viewing`}
+              {viewers.length === 1
+                ? `${viewers[0].name} is ${viewers[0].mode === "editing" ? "editing" : "viewing"}`
+                : (() => {
+                    const editors = viewers.filter(v => v.mode === "editing")
+                    const viewersOnly = viewers.filter(v => v.mode !== "editing")
+                    if (editors.length > 0 && viewersOnly.length === 0) return `${editors.length === 1 ? editors[0].name : `${editors.length} others`} ${editors.length === 1 ? "is" : "are"} editing`
+                    if (editors.length === 0) return `${viewers.length} others are viewing`
+                    return `${editors.length} editing, ${viewersOnly.length} viewing`
+                  })()
+              }
             </span>
           </div>
         )}
@@ -519,15 +597,20 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                   {validTransitions.map((s) => {
                     const sc = statusConfig[s]
                     const isBlocked = s === "done" && blockingTasks.length > 0
+                    const isStaged = watchedStatus === s && s !== task.status
                     return (
                       <button
                         key={s}
-                        onClick={() => !isBlocked && handleTransition(s)}
-                        disabled={transitioning !== null || isBlocked}
+                        onClick={() => !isBlocked && stageStatus(s)}
+                        disabled={isBlocked}
                         title={isBlocked ? `Blocked by: ${blockingTasks.map((t) => t.title).join(", ")}` : undefined}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${sc.bg} ${sc.text} border-current/20 hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed`}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                          isStaged
+                            ? "border-[#0E0D0C] bg-[#0E0D0C] text-white"
+                            : `${sc.bg} ${sc.text} border-current/20 hover:opacity-80`
+                        } disabled:opacity-40 disabled:cursor-not-allowed`}
                       >
-                        {transitioning === s ? "Moving…" : sc.label}
+                        {isStaged ? `→ ${sc.label}` : sc.label}
                       </button>
                     )
                   })}
@@ -557,9 +640,9 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                     <button
                       key={p}
                       type="button"
-                      onClick={() => setEditPriority(p)}
+                      onClick={() => setValue("priority", p)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all capitalize ${
-                        editPriority === p
+                        watchedPriority === p
                           ? "border-[#0E0D0C] bg-[#0E0D0C] text-white"
                           : "border-black/10 text-[#0E0D0C]/50 hover:border-black/20"
                       }`}
@@ -583,13 +666,25 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                 Description
               </p>
               {isEditing ? (
-                <textarea
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder="Add a description..."
-                  rows={6}
-                  className="w-full text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none resize-none border border-black/[0.06] rounded-lg px-3 py-2.5 focus:border-black/20 transition-colors"
-                />
+                <div className="relative">
+                  <textarea
+                    ref={descriptionRef}
+                    value={yjsDescription}
+                    onChange={(e) => onYjsDescriptionChange(e.target.value)}
+                    onSelect={(e) => onCursorMove((e.target as HTMLTextAreaElement).selectionStart)}
+                    onClick={(e) => onCursorMove((e.target as HTMLTextAreaElement).selectionStart)}
+                    onKeyUp={(e) => onCursorMove((e.target as HTMLTextAreaElement).selectionStart)}
+                    placeholder="Add a description..."
+                    rows={6}
+                    className="w-full text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none resize-none border border-black/[0.06] rounded-lg px-3 py-2.5 focus:border-black/20 transition-colors"
+                  />
+                  <CollaborativeCursors
+                    peers={cursorPeers}
+                    members={members}
+                    textareaRef={descriptionRef}
+                    value={yjsDescription}
+                  />
+                </div>
               ) : (
                 <p className="text-sm text-[#0E0D0C]/70 leading-relaxed">
                   {task.configuration.description || <span className="italic text-[#0E0D0C]/25">No description</span>}
@@ -603,7 +698,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                 Assigned To
               </p>
               {isEditing ? (
-                <MemberPicker members={members} selected={editAssignedTo} onChange={setEditAssignedTo} />
+                <MemberPicker members={members} selected={watchedAssignedTo} onChange={(v) => setValue("assignedTo", v)} />
               ) : task.assignedTo.length === 0 ? (
                 <p className="text-sm italic text-[#0E0D0C]/25">Unassigned</p>
               ) : (
@@ -627,12 +722,12 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
               </p>
               {isEditing ? (
                 <div className="flex flex-wrap gap-1.5 items-center min-h-[38px] px-3 py-2 border border-black/[0.06] rounded-lg focus-within:border-black/20 transition-colors">
-                  {editTags.map((tag) => (
+                  {watchedTags.map((tag) => (
                     <span key={tag} className="flex items-center gap-1 text-xs px-2 py-0.5 bg-black/5 text-[#0E0D0C]/60 rounded-md">
                       {tag}
                       <button
                         type="button"
-                        onClick={() => setEditTags((prev) => prev.filter((t) => t !== tag))}
+                        onClick={() => setValue("tags", watchedTags.filter((t) => t !== tag))}
                         className="text-[#0E0D0C]/30 hover:text-[#0E0D0C]/70 leading-none"
                       >
                         ×
@@ -645,7 +740,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                     onChange={(e) => setEditTagInput(e.target.value)}
                     onKeyDown={handleTagKeyDown}
                     onBlur={addTag}
-                    placeholder={editTags.length === 0 ? "Add tags, press Enter…" : ""}
+                    placeholder={watchedTags.length === 0 ? "Add tags, press Enter…" : ""}
                     className="flex-1 min-w-24 text-sm text-[#0E0D0C] placeholder:text-[#0E0D0C]/20 outline-none bg-transparent"
                   />
                 </div>
@@ -670,9 +765,9 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                     Dependencies
                   </p>
                   <div className="flex flex-col gap-2">
-                    {editDependencyIds.length > 0 && (
+                    {watchedDependencyIds.length > 0 && (
                       <div className="flex flex-col gap-1.5">
-                        {editDependencyIds.map((depId) => {
+                        {watchedDependencyIds.map((depId) => {
                           const dep = allTasks.find((t) => t.id === depId)
                           if (!dep) return null
                           const sc = statusConfig[dep.status]
@@ -696,7 +791,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                       </div>
                     )}
                     {(() => {
-                      const available = otherTasks.filter((t) => !editDependencyIds.includes(t.id))
+                      const available = otherTasks.filter((t) => !watchedDependencyIds.includes(t.id))
                       const visible = showAllDeps ? available : available.slice(0, 5)
                       const hiddenCount = available.length - 5
                       if (available.length === 0) return null
@@ -847,7 +942,13 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
                           })}
                         </span>
                       </div>
-                      <p className="text-sm text-[#0E0D0C]/70 leading-relaxed break-words">{c.content}</p>
+                      <p className="text-sm text-[#0E0D0C]/70 leading-relaxed break-words">
+                        {c.content.split(/(@\w+)/).map((part, i) =>
+                          /^@\w+$/.test(part)
+                            ? <span key={i} className="text-blue-600 font-medium">{part}</span>
+                            : part
+                        )}
+                      </p>
                     </div>
                   </div>
                 ))

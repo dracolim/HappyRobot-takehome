@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core"
 import { api } from "@/lib/api"
 import { COLUMNS } from "@/lib/types"
@@ -10,10 +11,13 @@ import { KanbanColumn } from "./KanbanColumn"
 import { TaskCard } from "./TaskCard"
 import { TaskModal } from "./TaskModal"
 import { TaskDetailModal, UpdatePayload } from "./TaskDetailModal"
+import { ActivityFeed } from "../ActivityFeed"
 
 interface Props {
   projectId: string
   projectName: string
+  projectDescription?: string
+  initialTaskId?: string
 }
 
 function MembersPanel({
@@ -23,6 +27,7 @@ function MembersPanel({
   onRemove,
   currentUserId,
   isOwner,
+  onlineUserIds,
 }: {
   projectId: string
   members: ProjectMember[]
@@ -30,6 +35,7 @@ function MembersPanel({
   onRemove: (userId: string) => Promise<void>
   currentUserId: string | null
   isOwner: boolean
+  onlineUserIds: string[]
 }) {
   const [email, setEmail] = useState("")
   const [inviting, setInviting] = useState(false)
@@ -55,8 +61,13 @@ function MembersPanel({
       <div className="flex flex-col gap-1.5">
         {members.map((m) => (
           <div key={m.userId} className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-full bg-[#0E0D0C] flex items-center justify-center text-[10px] font-bold text-white shrink-0">
-              {m.name[0]?.toUpperCase()}
+            <div className="relative shrink-0">
+              <div className="w-7 h-7 rounded-full bg-[#0E0D0C] flex items-center justify-center text-[10px] font-bold text-white">
+                {m.name[0]?.toUpperCase()}
+              </div>
+              {onlineUserIds.includes(m.userId) && (
+                <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-400 border border-white" />
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-[#0E0D0C] truncate">{m.name}</p>
@@ -109,7 +120,8 @@ function MembersPanel({
   )
 }
 
-export function KanbanBoard({ projectId, projectName }: Props) {
+export function KanbanBoard({ projectId, projectName, projectDescription, initialTaskId }: Props) {
+  const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [modalStatus, setModalStatus] = useState<TaskStatus | null>(null)
@@ -120,24 +132,65 @@ export function KanbanBoard({ projectId, projectName }: Props) {
   const [realtimeComments, setRealtimeComments] = useState<import("@/lib/types").Comment[]>([])
   const [realtimeAttachments, setRealtimeAttachments] = useState<import("@/lib/types").Attachment[]>([])
   const [realtimeDeletedAttachmentIds, setRealtimeDeletedAttachmentIds] = useState<string[]>([])
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([])
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [dragError, setDragError] = useState<string | null>(null)
+  const [showActivity, setShowActivity] = useState(false)
+  const [latestEvent, setLatestEvent] = useState<SocketEvent | null>(null)
   const membersPanelRef = useRef<HTMLDivElement>(null)
+
+  const [displayName, setDisplayName] = useState(projectName)
+  const [displayDescription, setDisplayDescription] = useState(projectDescription ?? "")
+  const [editingName, setEditingName] = useState(false)
+  const [editingDesc, setEditingDesc] = useState(false)
+  const [nameValue, setNameValue] = useState(projectName)
+  const [descValue, setDescValue] = useState(projectDescription ?? "")
+
+  const saveName = useCallback(async () => {
+    const trimmed = nameValue.trim()
+    if (!trimmed || trimmed === displayName) { setEditingName(false); setNameValue(displayName); return }
+    try {
+      await api.projects.update(projectId, { name: trimmed })
+      setDisplayName(trimmed)
+      window.dispatchEvent(new CustomEvent("app:projectCreated"))
+    } catch { setNameValue(displayName) }
+    setEditingName(false)
+  }, [nameValue, displayName, projectId])
+
+  const saveDesc = useCallback(async () => {
+    const trimmed = descValue.trim()
+    if (trimmed === displayDescription) { setEditingDesc(false); return }
+    try {
+      await api.projects.update(projectId, { description: trimmed })
+      setDisplayDescription(trimmed)
+    } catch { setDescValue(displayDescription) }
+    setEditingDesc(false)
+  }, [descValue, displayDescription, projectId])
 
   const currentUserId = typeof window !== "undefined"
     ? (() => {
-        try {
-          const token = localStorage.getItem("token")
-          if (!token) return null
-          const payload = JSON.parse(atob(token.split(".")[1]))
-          return payload.sub as string
-        } catch { return null }
+        try { return (JSON.parse(localStorage.getItem("currentUser") ?? "null") as { id?: string } | null)?.id ?? null }
+        catch { return null }
       })()
     : null
 
   const isOwner = members.find((m) => m.userId === currentUserId)?.role === "owner"
 
+  const yjsHandlerRef = useRef<((e: SocketEvent) => void) | null>(null)
+  const registerYjsHandler = useCallback((handler: ((e: SocketEvent) => void) | null) => {
+    yjsHandlerRef.current = handler
+  }, [])
+
   const handleSocketEvent = useCallback((event: SocketEvent) => {
+    if (event.type === "yjs.sync.init" || event.type === "yjs.update" || event.type === "awareness.update" || event.type === "presence.mode") {
+      yjsHandlerRef.current?.(event)
+      if (event.type !== "presence.mode") return
+    }
+    // Also forward presence.updated so useYjs can re-announce cursor state to new joiners.
+    // The handler filters by taskId internally — forwarding all presence.updated is safe.
+    if (event.type === "presence.updated") {
+      yjsHandlerRef.current?.(event)
+    }
     if (event.type === "task.created") {
       setTasks((prev) => [...prev, event.task])
     } else if (event.type === "task.updated") {
@@ -163,18 +216,45 @@ export function KanbanBoard({ projectId, projectName }: Props) {
         next.set(event.taskId, event.users.filter((u) => u.userId !== currentUserId))
         return next
       })
+    } else if (event.type === "project.online") {
+      setOnlineUserIds(event.userIds)
+    } else if (event.type === "presence.mode") {
+      setPresenceMap((prev) => {
+        const next = new Map(prev)
+        const users = next.get(event.taskId) ?? []
+        next.set(event.taskId, users.map((u) => u.userId === event.userId ? { ...u, mode: event.mode } : u))
+        return next
+      })
+    } else if (event.type === "notification.created") {
+      window.dispatchEvent(new CustomEvent("app:notification", { detail: event.notification }))
+    } else if (event.type === "project.updated") {
+      setDisplayName(event.project.name)
+      setNameValue(event.project.name)
+      setDisplayDescription(event.project.description ?? "")
+      setDescValue(event.project.description ?? "")
+      window.dispatchEvent(new CustomEvent("app:projectCreated"))
     }
+    setLatestEvent(event)
   }, [currentUserId])
 
-  const { joinTask, leaveTask, heartbeat } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
+  const { joinTask, leaveTask, heartbeat, sendRaw } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
 
   useEffect(() => {
     api.tasks
       .list(projectId)
-      .then((res) => setTasks(res.tasks))
+      .then((res) => {
+        setTasks(res.tasks)
+        if (initialTaskId) {
+          const target = res.tasks.find((t) => t.id === initialTaskId)
+          if (target) {
+            setSelectedTask(target)
+            router.replace(`/projects/${projectId}`)
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [projectId])
+  }, [projectId, initialTaskId, router])
 
   useEffect(() => {
     api.members.list(projectId).then((res) => setMembers(res.members)).catch(() => {})
@@ -251,6 +331,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
       })
       .then((res) => {
         setTasks((prev) => prev.map((t) => (t.id === optimistic.id ? res.task : t)))
+        window.dispatchEvent(new CustomEvent("app:activityRefresh"))
         if (data.files.length > 0) {
           Promise.allSettled(data.files.map((f) => api.attachments.upload(res.task.id, f))).catch(() => {})
         }
@@ -263,6 +344,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
       const res = await api.tasks.update(projectId, taskId, updates as Parameters<typeof api.tasks.update>[2])
       setTasks((prev) => prev.map((t) => (t.id === taskId ? res.task : t)))
       setSelectedTask((prev) => (prev?.id === taskId ? res.task : prev))
+      window.dispatchEvent(new CustomEvent("app:activityRefresh"))
     } catch (err) {
       if (err instanceof Error && err.message.includes("modified by someone else")) {
         // refresh so the modal shows the latest version before retrying
@@ -279,6 +361,7 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     await api.tasks.delete(projectId, taskId)
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
     setSelectedTask(null)
+    window.dispatchEvent(new CustomEvent("app:activityRefresh"))
   }
 
   const sensors = useSensors(
@@ -325,6 +408,18 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     ))
   }
 
+  const handleAttachmentUploaded = (taskId: string) => {
+    setTasks((prev) => prev.map((t) =>
+      t.id === taskId ? { ...t, attachmentCount: (t.attachmentCount ?? 0) + 1 } : t
+    ))
+  }
+
+  const handleAttachmentDeleted = (taskId: string) => {
+    setTasks((prev) => prev.map((t) =>
+      t.id === taskId ? { ...t, attachmentCount: Math.max(0, (t.attachmentCount ?? 0) - 1) } : t
+    ))
+  }
+
   const handleInvite = async (email: string) => {
     const res = await api.members.invite(projectId, { email })
     setMembers((prev) => {
@@ -350,7 +445,58 @@ export function KanbanBoard({ projectId, projectName }: Props) {
     <>
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between px-8 py-5 bg-white border-b border-black/[0.06]">
-          <h1 className="text-base font-semibold text-[#0E0D0C]">{projectName}</h1>
+          <div className="flex flex-col gap-0.5">
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") { setEditingName(false); setNameValue(displayName) } }}
+                className="text-base font-semibold text-[#0E0D0C] bg-transparent border-b border-black/20 outline-none w-64"
+              />
+            ) : (
+              <h1
+                className="text-base font-semibold text-[#0E0D0C] cursor-pointer hover:text-black/60 transition-colors"
+                onClick={() => setEditingName(true)}
+                title="Click to edit"
+              >
+                {displayName}
+              </h1>
+            )}
+            {editingDesc ? (
+              <input
+                autoFocus
+                value={descValue}
+                onChange={(e) => setDescValue(e.target.value)}
+                onBlur={saveDesc}
+                onKeyDown={(e) => { if (e.key === "Enter") saveDesc(); if (e.key === "Escape") { setEditingDesc(false); setDescValue(displayDescription) } }}
+                placeholder="Add a description..."
+                className="text-xs text-[#0E0D0C]/50 bg-transparent border-b border-black/20 outline-none w-72"
+              />
+            ) : (
+              <p
+                className="text-xs text-[#0E0D0C]/40 cursor-pointer hover:text-[#0E0D0C]/60 transition-colors"
+                onClick={() => setEditingDesc(true)}
+                title="Click to edit"
+              >
+                {displayDescription || <span className="italic">Add a description...</span>}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Activity feed toggle */}
+            <button
+              type="button"
+              onClick={() => setShowActivity(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${showActivity ? "bg-black/[0.06] text-[#0E0D0C]" : "text-[#0E0D0C]/40 hover:bg-black/5 hover:text-[#0E0D0C]/70"}`}
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path d="M1 10h2M4 7h2M7 5h2M10 2h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              Activity
+            </button>
 
           {/* Members */}
           <div className="relative" ref={membersPanelRef}>
@@ -360,15 +506,19 @@ export function KanbanBoard({ projectId, projectName }: Props) {
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-black/5 transition-colors"
             >
               <div className="flex -space-x-2">
-                {members.slice(0, 4).map((m) => (
-                  <div
-                    key={m.userId}
-                    title={m.name}
-                    className="w-7 h-7 rounded-full bg-[#0E0D0C] border-2 border-white flex items-center justify-center text-[10px] font-bold text-white"
-                  >
-                    {m.name[0]?.toUpperCase()}
-                  </div>
-                ))}
+                {members.slice(0, 4).map((m) => {
+                  const isOnline = onlineUserIds.includes(m.userId)
+                  return (
+                    <div key={m.userId} className="relative" title={`${m.name}${isOnline ? " · online" : ""}`}>
+                      <div className="w-7 h-7 rounded-full bg-[#0E0D0C] border-2 border-white flex items-center justify-center text-[10px] font-bold text-white">
+                        {m.name[0]?.toUpperCase()}
+                      </div>
+                      {isOnline && (
+                        <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-400 border border-white" />
+                      )}
+                    </div>
+                  )
+                })}
                 {members.length > 4 && (
                   <div className="w-7 h-7 rounded-full bg-black/10 border-2 border-white flex items-center justify-center text-[9px] font-bold text-[#0E0D0C]/60">
                     +{members.length - 4}
@@ -392,14 +542,17 @@ export function KanbanBoard({ projectId, projectName }: Props) {
                   onRemove={handleRemoveMember}
                   currentUserId={currentUserId}
                   isOwner={isOwner}
+                  onlineUserIds={onlineUserIds}
                 />
               </div>
             )}
           </div>
+          </div>
         </div>
 
+        <div className="flex flex-1 min-h-0">
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
-          <div className="flex gap-5 p-8 flex-1 min-w-0">
+          <div className="flex gap-5 p-8 flex-1 min-w-0 overflow-x-auto">
             {COLUMNS.map((col) => (
               <KanbanColumn
                 key={col.id}
@@ -425,11 +578,32 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           </DragOverlay>
         </DndContext>
 
+        {/* Activity feed side panel */}
+        {showActivity && (
+          <div className="w-72 shrink-0 border-l border-black/[0.06] bg-white flex flex-col overflow-hidden">
+            <div className="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-black/40">Activity</span>
+              <button onClick={() => setShowActivity(false)} className="text-black/20 hover:text-black/50 transition-colors text-xs">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <ActivityFeed
+                projectId={projectId}
+                latestEvent={latestEvent}
+                onTaskClick={(taskId) => {
+                  const task = tasks.find(t => t.id === taskId)
+                  if (task) setSelectedTask(task)
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         {dragError && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#0E0D0C] text-white text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg pointer-events-none whitespace-nowrap">
             {dragError}
           </div>
         )}
+        </div>
       </div>
 
       {modalStatus && (
@@ -453,12 +627,16 @@ export function KanbanBoard({ projectId, projectName }: Props) {
           onJoinTask={joinTask}
           onLeaveTask={leaveTask}
           onHeartbeat={heartbeat}
+          sendRaw={sendRaw}
+          onRegisterYjsHandler={registerYjsHandler}
           viewers={presenceMap.get(selectedTask.id) ?? []}
-          realtimeComments={realtimeComments}
+          realtimeComments={realtimeComments.filter((c) => c.taskId === selectedTask.id)}
           onCommentPosted={handleCommentPosted}
           realtimeAttachments={realtimeAttachments.filter((a) => a.taskId === selectedTask.id)}
           realtimeDeletedAttachmentIds={realtimeDeletedAttachmentIds}
           members={members}
+          onAttachmentUploaded={handleAttachmentUploaded}
+          onAttachmentDeleted={handleAttachmentDeleted}
         />
       )}
     </>
