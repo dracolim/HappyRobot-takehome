@@ -120,6 +120,12 @@ function MembersPanel({
   )
 }
 
+const ACTIVITY_EVENT_TYPES = new Set([
+  "task.created", "task.updated", "task.deleted",
+  "comment.created", "attachment.created", "attachment.deleted",
+  "member.added", "member.removed", "project.updated",
+])
+
 export function KanbanBoard({ projectId, projectName, projectDescription, initialTaskId }: Props) {
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -167,12 +173,11 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     setEditingDesc(false)
   }, [descValue, displayDescription, projectId])
 
-  const currentUserId = typeof window !== "undefined"
-    ? (() => {
-        try { return (JSON.parse(localStorage.getItem("currentUser") ?? "null") as { id?: string } | null)?.id ?? null }
-        catch { return null }
-      })()
-    : null
+  const currentUserId = useMemo(() => {
+    if (typeof window === "undefined") return null
+    try { return (JSON.parse(localStorage.getItem("currentUser") ?? "null") as { id?: string } | null)?.id ?? null }
+    catch { return null }
+  }, [])
 
   const isOwner = members.find((m) => m.userId === currentUserId)?.role === "owner"
 
@@ -186,15 +191,12 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       yjsHandlerRef.current?.(event)
       if (event.type !== "presence.mode") return
     }
-    // Also forward presence.updated so useYjs can re-announce cursor state to new joiners.
-    // The handler filters by taskId internally — forwarding all presence.updated is safe.
     if (event.type === "presence.updated") {
       yjsHandlerRef.current?.(event)
     }
     if (event.type === "task.created") {
       setTasks((prev) => prev.some((t) => t.id === event.task.id) ? prev : [...prev, event.task])
     } else if (event.type === "task.updated") {
-      // description is managed by Yjs and stripped from broadcast payloads; preserve the local value
       const mergeTask = (existing: Task): Task => ({
         ...existing,
         ...event.task,
@@ -217,7 +219,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       ))
     } else if (event.type === "attachment.created") {
       setRealtimeAttachments((prev) => prev.some((a) => a.id === event.attachment.id) ? prev : [...prev, event.attachment])
-      setTasks((prev) => prev.map((t) => t.id === event.taskId ? { ...t, attachmentCount: (t.attachmentCount ?? 0) + 1 } : t))
+      setTasks((prev) => prev.map((t) => t.id === event.taskId ? { ...t, attachmentCount: event.attachmentCount } : t))
     } else if (event.type === "attachment.deleted") {
       setRealtimeDeletedAttachmentIds((prev) => [...prev, event.attachmentId])
       setTasks((prev) => prev.map((t) => t.id === event.taskId ? { ...t, attachmentCount: Math.max(0, (t.attachmentCount ?? 0) - 1) } : t))
@@ -258,7 +260,9 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       setDescValue(event.project.description ?? "")
       window.dispatchEvent(new CustomEvent("app:projectCreated"))
     }
-    setLatestEvent(event)
+    if (ACTIVITY_EVENT_TYPES.has(event.type)) {
+      setLatestEvent(event)
+    }
   }, [currentUserId])
 
   const { joinTask, leaveTask, heartbeat, sendRaw } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
@@ -277,7 +281,22 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
           cursor = res.nextCursor
         } while (cursor)
 
-        setTasks(all)
+        setTasks((prev) => {
+          const allMap = new Map(all.map((t) => [t.id, t]))
+          const merged = all.map((t) => {
+            const ws = prev.find((p) => p.id === t.id)
+            if (!ws) return t
+            return {
+              ...t,
+              attachmentCount: Math.max(t.attachmentCount ?? 0, ws.attachmentCount ?? 0),
+              commentCount: Math.max(t.commentCount ?? 0, ws.commentCount ?? 0),
+            }
+          })
+          for (const t of prev) {
+            if (!allMap.has(t.id) && !t.id.startsWith("temp-")) merged.push(t)
+          }
+          return merged
+        })
         if (initialTaskId) {
           const target = all.find((t) => t.id === initialTaskId)
           if (target) {
@@ -286,7 +305,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
           }
         }
       } catch {
-        // ignore — board shows empty state
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -311,7 +329,15 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     return () => document.removeEventListener("mousedown", handler)
   }, [showMembers])
 
-  const tasksByStatus = (status: TaskStatus) => tasks.filter((t) => t.status === status)
+  const tasksByStatus = useMemo(() => {
+    const map = new Map<TaskStatus, Task[]>()
+    for (const t of tasks) {
+      const arr = map.get(t.status) ?? []
+      arr.push(t)
+      map.set(t.status, arr)
+    }
+    return map
+  }, [tasks])
 
   const blockingCountMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -370,8 +396,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
         dependencyIds: data.dependencyIds,
       })
       .then((res) => {
-        // Merge optimistic fields that the raw INSERT .returning() may not include
-        // (e.g. assignedTo, tags — kept in sync from what the user typed in the modal)
         const confirmed: Task = {
           ...optimistic,
           ...res.task,
@@ -386,11 +410,9 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
         if (data.files.length > 0) {
           data.files.forEach(async (f) => {
             try {
-              await api.attachments.upload(res.task.id, f)
-              // Creator is excluded from their own attachment.created WS events,
-              // so increment the count locally as each upload confirms.
-              handleAttachmentUploaded(res.task.id)
-            } catch { /* silent — individual upload failure doesn't block others */ }
+              const { attachmentCount } = await api.attachments.upload(res.task.id, f)
+              handleAttachmentUploaded(res.task.id, attachmentCount)
+            } catch { }
           })
         }
       })
@@ -405,7 +427,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       window.dispatchEvent(new CustomEvent("app:activityRefresh"))
     } catch (err) {
       if (err instanceof Error && err.message.includes("modified by someone else")) {
-        // refresh so the modal shows the latest version before retrying
         api.tasks.list(projectId).then((res) => {
           setTasks(res.tasks)
           setSelectedTask(res.tasks.find((t) => t.id === taskId) ?? null)
@@ -466,9 +487,9 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     ))
   }
 
-  const handleAttachmentUploaded = (taskId: string) => {
+  const handleAttachmentUploaded = (taskId: string, attachmentCount: number) => {
     setTasks((prev) => prev.map((t) =>
-      t.id === taskId ? { ...t, attachmentCount: (t.attachmentCount ?? 0) + 1 } : t
+      t.id === taskId ? { ...t, attachmentCount } : t
     ))
   }
 
@@ -544,7 +565,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Activity feed toggle */}
             <button
               type="button"
               onClick={() => setShowActivity(v => !v)}
@@ -556,7 +576,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
               Activity
             </button>
 
-          {/* Members */}
           <div className="relative" ref={membersPanelRef}>
             <button
               type="button"
@@ -616,7 +635,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
                 key={col.id}
                 label={col.label}
                 status={col.id}
-                tasks={tasksByStatus(col.id)}
+                tasks={tasksByStatus.get(col.id) ?? []}
                 blockingCountMap={blockingCountMap}
                 presenceMap={presenceMap}
                 onAddTask={() => setModalStatus(col.id)}
@@ -636,7 +655,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
           </DragOverlay>
         </DndContext>
 
-        {/* Activity feed side panel */}
         {showActivity && (
           <div className="w-72 shrink-0 border-l border-black/[0.06] bg-white flex flex-col overflow-hidden">
             <div className="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between">

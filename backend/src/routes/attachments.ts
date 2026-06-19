@@ -3,7 +3,7 @@ import { GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
 import type { Readable } from "node:stream"
 import { db } from "../db"
 import { attachments, tasks } from "../db/schema"
-import { eq } from "drizzle-orm"
+import { eq, count } from "drizzle-orm"
 import { s3, BUCKET, createPresignedPutUrl } from "../storage/s3"
 import type { AuthRequest } from "../middleware/auth"
 import { broadcast } from "../ws/manager"
@@ -69,8 +69,13 @@ taskAttachmentsRouter.post("/:taskId/attachments/confirm", async (req, res): Pro
       .values({ taskId, uploaderId: userId, filename, objectKey, size, mimeType })
       .returning()
 
-    broadcast(task.projectId, { type: "attachment.created", taskId, attachment }, userId).catch(() => {})
-    res.status(201).json({ attachment })
+    const [{ attachmentCount }] = await db
+      .select({ attachmentCount: count() })
+      .from(attachments)
+      .where(eq(attachments.taskId, taskId))
+
+    broadcast(task.projectId, { type: "attachment.created", taskId, attachment, attachmentCount }, userId).catch(() => {})
+    res.status(201).json({ attachment, attachmentCount })
   } catch (err) {
     console.error("[POST confirm]", err)
     res.status(500).json({ error: "Failed to confirm upload" })

@@ -16,7 +16,7 @@ export type SocketEvent =
   | { type: "task.deleted"; taskId: string }
   | { type: "comment.created"; comment: Comment }
   | { type: "presence.updated"; taskId: string; users: PresenceUser[] }
-  | { type: "attachment.created"; taskId: string; attachment: Attachment }
+  | { type: "attachment.created"; taskId: string; attachment: Attachment; attachmentCount: number }
   | { type: "attachment.deleted"; taskId: string; attachmentId: string }
   | { type: "yjs.sync.init"; taskId: string; state: string }
   | { type: "yjs.update"; taskId: string; update: string }

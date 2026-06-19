@@ -101,7 +101,7 @@ export const api = {
   attachments: {
     list: (taskId: string) =>
       request<{ attachments: Attachment[] }>(`/api/tasks/${taskId}/attachments`),
-    upload: async (taskId: string, file: File): Promise<{ attachment: Attachment }> => {
+    upload: async (taskId: string, file: File): Promise<{ attachment: Attachment; attachmentCount: number }> => {
       // Step 1: get a short-lived presigned PUT URL from the backend
       const { presignedUrl, objectKey } = await request<{ presignedUrl: string; objectKey: string }>(
         `/api/tasks/${taskId}/attachments/presign`,
@@ -117,7 +117,7 @@ export const api = {
       if (!putRes.ok) throw new Error("Upload to storage failed")
 
       // Step 3: confirm with backend so it registers in DB and broadcasts WS event
-      return request<{ attachment: Attachment }>(
+      return request<{ attachment: Attachment; attachmentCount: number }>(
         `/api/tasks/${taskId}/attachments/confirm`,
         { method: "POST", body: JSON.stringify({ objectKey, filename: file.name, size: file.size, mimeType: file.type }) },
       )

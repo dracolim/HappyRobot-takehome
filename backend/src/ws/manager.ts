@@ -318,8 +318,10 @@ export function setupWebSocket(server: Server): void {
           }
           await upsertPresence(msg.taskId, userId)
           const updated = await getPresence(msg.taskId)
+          // exclude the joiner from pub/sub — they get the direct ws.send below
           await publisher.publish(channel, JSON.stringify({
             event: { type: "presence.updated", taskId: msg.taskId, users: updated },
+            senderId: userId,
           }))
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "presence.updated", taskId: msg.taskId, users: updated }))
@@ -364,7 +366,7 @@ export function setupWebSocket(server: Server): void {
         if (msg.type === "yjs.update" && msg.taskId && msg.update) {
           const doc = await getOrCreateYjsDoc(msg.taskId, projectId)
           Y.applyUpdate(doc, Buffer.from(msg.update as string, "base64"))
-          broadcast(projectId, { type: "yjs.update", taskId: msg.taskId, update: msg.update }).catch(() => {})
+          broadcast(projectId, { type: "yjs.update", taskId: msg.taskId, update: msg.update }, userId).catch(() => {})
           scheduleYjsSave(msg.taskId)
         }
 

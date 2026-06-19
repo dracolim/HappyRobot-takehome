@@ -178,7 +178,7 @@ interface Props {
   realtimeAttachments: Attachment[]
   realtimeDeletedAttachmentIds: string[]
   members: ProjectMember[]
-  onAttachmentUploaded: (taskId: string) => void
+  onAttachmentUploaded: (taskId: string, attachmentCount: number) => void
   onAttachmentDeleted: (taskId: string) => void
 }
 
@@ -425,7 +425,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
     try {
       const res = await api.attachments.upload(task.id, file)
       setAttachments((prev) => [...prev, res.attachment])
-      onAttachmentUploaded(task.id)
+      onAttachmentUploaded(task.id, res.attachmentCount)
     } finally {
       setUploading(false)
     }
