@@ -98,11 +98,11 @@ Tasks declare dependencies on other tasks, rendered as a directed acyclic graph.
 ---
 
 ## Architecture Decisions
+### High Level overview diagram
+<img width="1342" height="347" alt="image" src="https://github.com/user-attachments/assets/006ef9e3-faa6-482b-8ae2-c59b98077dec" />
+
 ### Data Model Diagram
 <img width="750" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
-
-###  Container Diagram
-<img width="646" height="779" alt="image" src="https://github.com/user-attachments/assets/0e6891e8-d28e-42f0-a145-4b362fffde77" />
 
 
 **REST for writes + WebSocket for push, backed by Redis pub/sub.**
