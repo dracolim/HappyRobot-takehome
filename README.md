@@ -69,33 +69,46 @@ Cursor positions are shared via `y-protocols/awareness`. Each cursor is anchored
 
 **Collaborative text editing**
 The task description uses Yjs CRDT. Multiple users can type simultaneously and edits always converge to the same result. Saving is explicit — clicking Save commits the change; Cancel reverts the document and broadcasts the revert to all collaborators.
+<br/><img width="1705" height="875" alt="Screenshot 2026-06-19 at 10 17 30 AM" src="https://github.com/user-attachments/assets/b93e0182-dc89-4f5c-b891-07b2c84db523" />
+<img width="1704" height="908" alt="Screenshot 2026-06-19 at 10 16 40 AM" src="https://github.com/user-attachments/assets/b4c4cb93-8fa7-4bab-ba49-573369895571" />
+
+<img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/3a6cac80-bd2d-4676-86fa-979cc998a25d" />
 
 **Activity feed with real-time notifications**
 Every task mutation is written to an append-only `events` table and broadcast as a socket event. The sidebar feed updates live and shows exactly what changed: `moved from To Do → In Review`, `renamed "Old" → "New"`.
 
-<img width="323" height="912" alt="Screenshot 2026-06-19 at 9 32 20 AM" src="https://github.com/user-attachments/assets/93787220-80f6-44a3-bfdf-b2022a6bdcd5" />
+<img width="323" height="700" alt="Screenshot 2026-06-19 at 9 32 20 AM" src="https://github.com/user-attachments/assets/93787220-80f6-44a3-bfdf-b2022a6bdcd5" />
 
 
 **@mentions with notifications**
 `@name` patterns in comments are parsed on the backend. Mentioned members receive an in-app notification over WebSocket, persisted in the `notifications` table across sessions.
 <br/>
+<img width="423" height="500" alt="Screenshot 2026-06-19 at 9 32 05 AM" src="https://github.com/user-attachments/assets/1639459b-27a5-412e-970c-209118515267" />
 <img width="433" height="148" alt="Screenshot 2026-06-19 at 9 31 38 AM" src="https://github.com/user-attachments/assets/c56176a0-f4d3-46fb-88ff-dd5f8136e709" />
-<img width="423" height="768" alt="Screenshot 2026-06-19 at 9 32 05 AM" src="https://github.com/user-attachments/assets/1639459b-27a5-412e-970c-209118515267" />
+
 
 
 ### Option 4 — Open-Ended Extension
 
 **Kanban board with drag-and-drop**
 Built with `@dnd-kit`. Cards drag between status columns. Dropping a task into "Done" when its dependencies are incomplete is blocked at both the UI and API level.
+<img width="1705" height="875" alt="Screenshot 2026-06-19 at 10 17 30 AM" src="https://github.com/user-attachments/assets/2539cc66-4924-4640-b759-98a023aa8d3f" />
 
 **Task dependency DAG**
 Tasks declare dependencies on other tasks, rendered as a directed acyclic graph. A task cannot move to "done" until all its dependencies are complete — enforced in the domain layer and at the API.
+<img width="847" height="320" alt="Screenshot 2026-06-19 at 10 18 59 AM" src="https://github.com/user-attachments/assets/e11b0c9f-1156-4445-9e87-d1714634cf5a" />
 
 ---
 
 ## Architecture Decisions
 **Data Model Diagram**
-<img width="850" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
+<img width="750" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
+
+**Container Diagram**
+Information on how the systems are interacting with one another<img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/5af14d42-1a1b-4e4f-9216-f171264fafc3" />
+<img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/9c3a07e9-5119-4ff1-94bc-ef3070876c2e" />
+
+<img width="646" height="779" alt="image" src="https://github.com/user-attachments/assets/0e6891e8-d28e-42f0-a145-4b362fffde77" />
 
 
 **REST for writes + WebSocket for push, backed by Redis pub/sub.**
