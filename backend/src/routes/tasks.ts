@@ -249,7 +249,8 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
       (ids) => db.select({ taskId: attachments.taskId, n: count() }).from(attachments).where(inArray(attachments.taskId, ids)).groupBy(attachments.taskId),
       "attachmentCount",
     )
-    broadcast(projectId, { type: "task.updated", task: withAll }, userId).catch(() => {})
+    const { configuration: { description: _yjsManaged, ...broadcastConfig }, ...taskRest } = withAll
+    broadcast(projectId, { type: "task.updated", task: { ...taskRest, configuration: broadcastConfig } }, userId).catch(() => {})
     res.json({ task: withAll })
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode === 409) {

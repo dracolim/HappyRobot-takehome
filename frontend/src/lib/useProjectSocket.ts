@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useCallback } from "react"
-import type { Task, Comment, Attachment, Project } from "./types"
+import type { Task, Comment, Attachment, Project, ProjectMember } from "./types"
 import { isActive } from "./activityTracker"
 
 export interface PresenceUser {
@@ -23,6 +23,8 @@ export type SocketEvent =
   | { type: "awareness.update"; taskId: string; update: string }
   | { type: "project.online"; userIds: string[] }
   | { type: "project.updated"; project: Project }
+  | { type: "member.added"; projectId: string; member: ProjectMember }
+  | { type: "member.removed"; projectId: string; userId: string }
   | { type: "presence.mode"; taskId: string; userId: string; mode: "viewing" | "editing" }
   | { type: "notification.created"; notification: import("./types").Notification & { fromUserName?: string } }
 
@@ -123,8 +125,8 @@ export function useProjectSocket({ projectId, onEvent }: Options) {
     }
   }, [])
 
-  const joinTask = useCallback((taskId: string) => {
-    send({ type: "presence.join", taskId })
+  const joinTask = useCallback((taskId: string, mode?: "viewing" | "editing") => {
+    send({ type: "presence.join", taskId, ...(mode ? { mode } : {}) })
   }, [send])
 
   const leaveTask = useCallback((taskId: string) => {

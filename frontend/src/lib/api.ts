@@ -74,7 +74,7 @@ export const api = {
   tasks: {
     list: (projectId: string, cursor?: string) =>
       request<{ tasks: Task[]; nextCursor: string | null }>(
-        `/api/projects/${projectId}/tasks${cursor ? `?cursor=${cursor}` : ""}`
+        `/api/projects/${projectId}/tasks?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
       ),
     create: (projectId: string, body: CreateTaskInput) =>
       request<{ task: Task }>(`/api/projects/${projectId}/tasks`, {

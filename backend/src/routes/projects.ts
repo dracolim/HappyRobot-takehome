@@ -4,7 +4,7 @@ import { projects, projectMembers, users } from "../db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import type { AuthRequest } from "../middleware/auth"
 import { CreateProjectSchema, UpdateProjectSchema, InviteMemberSchema } from "@happyrobot/shared"
-import { broadcast } from "../ws/manager"
+import { broadcast, sendToUser } from "../ws/manager"
 
 const router = Router()
 
@@ -170,9 +170,15 @@ router.post("/:id/members", async (req: Request, res: Response): Promise<void> =
       .values({ projectId: req.params.id, userId: invitee.id, role: "member" })
       .onConflictDoNothing()
 
-    res.status(201).json({
-      member: { userId: invitee.id, name: invitee.name, email: invitee.email, role: "member" },
-    })
+    const member = { userId: invitee.id, name: invitee.name, email: invitee.email, role: "member" as const }
+    const memberEvent = { type: "member.added", projectId: req.params.id, member }
+
+    // Notify existing project members so their members panel updates live
+    broadcast(req.params.id, memberEvent, userId).catch(() => {})
+    // Notify the invitee directly — they may be connected to a different project
+    sendToUser(invitee.id, memberEvent).catch(() => {})
+
+    res.status(201).json({ member })
   } catch (err) {
     console.error("[POST member]", err)
     res.status(500).json({ error: "Failed to invite member" })
@@ -198,6 +204,13 @@ router.delete("/:id/members/:memberId", async (req: Request, res: Response): Pro
           eq(projectMembers.userId, req.params.memberId)
         )
       )
+
+    const removeEvent = { type: "member.removed", projectId: req.params.id, userId: req.params.memberId }
+
+    // Notify remaining project members so their members panel updates live
+    broadcast(req.params.id, removeEvent, userId).catch(() => {})
+    // Notify the removed member directly so their sidebar drops the project
+    sendToUser(req.params.memberId, removeEvent).catch(() => {})
 
     res.status(204).end()
   } catch (err) {

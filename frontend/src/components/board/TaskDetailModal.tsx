@@ -167,7 +167,7 @@ interface Props {
   onSave: (taskId: string, updates: UpdatePayload) => Promise<void>
   onDelete: (taskId: string) => Promise<void>
   onOpenTask: (task: Task) => void
-  onJoinTask: (taskId: string) => void
+  onJoinTask: (taskId: string, mode?: "viewing" | "editing") => void
   onLeaveTask: (taskId: string) => void
   onHeartbeat: (taskId: string) => void
   sendRaw: (msg: object) => void
@@ -310,8 +310,7 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   useEffect(() => { isEditingRef.current = isEditing }, [isEditing])
   useEffect(() => {
     const resync = () => {
-      onJoinTask(task.id)
-      sendRaw({ type: "presence.mode", taskId: task.id, mode: isEditingRef.current ? "editing" : "viewing" })
+      onJoinTask(task.id, isEditingRef.current ? "editing" : "viewing")
     }
     window.addEventListener("ws:reconnected", resync)
     return () => window.removeEventListener("ws:reconnected", resync)

@@ -312,6 +312,10 @@ export function setupWebSocket(server: Server): void {
           }
 
           client.currentTaskId = msg.taskId
+          // add "mode" for presence.join
+          if (msg.mode === "editing" || msg.mode === "viewing") {
+            client.currentMode = msg.mode
+          }
           await upsertPresence(msg.taskId, userId)
           const updated = await getPresence(msg.taskId)
           await publisher.publish(channel, JSON.stringify({

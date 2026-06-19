@@ -194,8 +194,19 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     if (event.type === "task.created") {
       setTasks((prev) => [...prev, event.task])
     } else if (event.type === "task.updated") {
-      setTasks((prev) => prev.map((t) => (t.id === event.task.id ? event.task : t)))
-      setSelectedTask((prev) => (prev?.id === event.task.id ? event.task : prev))
+      // description is managed by Yjs and stripped from broadcast payloads; preserve the local value
+      const mergeTask = (existing: Task): Task => ({
+        ...existing,
+        ...event.task,
+        configuration: {
+          priority: event.task.configuration.priority,
+          tags: event.task.configuration.tags,
+          customFields: event.task.configuration.customFields,
+          description: existing.configuration.description,
+        },
+      })
+      setTasks((prev) => prev.map((t) => (t.id === event.task.id ? mergeTask(t) : t)))
+      setSelectedTask((prev) => (prev?.id === event.task.id ? mergeTask(prev) : prev))
     } else if (event.type === "task.deleted") {
       setTasks((prev) => prev.filter((t) => t.id !== event.taskId))
       setSelectedTask((prev) => (prev?.id === event.taskId ? null : prev))
@@ -225,6 +236,19 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
         next.set(event.taskId, users.map((u) => u.userId === event.userId ? { ...u, mode: event.mode } : u))
         return next
       })
+    } else if (event.type === "member.added") {
+      if (event.projectId === projectId) {
+        setMembers((prev) => prev.some((m) => m.userId === event.member.userId) ? prev : [...prev, event.member])
+      } else {
+        window.dispatchEvent(new CustomEvent("app:projectCreated"))
+      }
+    } else if (event.type === "member.removed") {
+      if (event.projectId === projectId) {
+        setMembers((prev) => prev.filter((m) => m.userId !== event.userId))
+        if (event.userId === currentUserId) router.push("/projects")
+      } else {
+        window.dispatchEvent(new CustomEvent("app:projectCreated"))
+      }
     } else if (event.type === "notification.created") {
       window.dispatchEvent(new CustomEvent("app:notification", { detail: event.notification }))
     } else if (event.type === "project.updated") {
@@ -240,20 +264,36 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
   const { joinTask, leaveTask, heartbeat, sendRaw } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
 
   useEffect(() => {
-    api.tasks
-      .list(projectId)
-      .then((res) => {
-        setTasks(res.tasks)
+    let cancelled = false
+
+    async function loadAll() {
+      try {
+        const all: Task[] = []
+        let cursor: string | null = null
+        do {
+          const res = await api.tasks.list(projectId, cursor ?? undefined)
+          if (cancelled) return
+          all.push(...res.tasks)
+          cursor = res.nextCursor
+        } while (cursor)
+
+        setTasks(all)
         if (initialTaskId) {
-          const target = res.tasks.find((t) => t.id === initialTaskId)
+          const target = all.find((t) => t.id === initialTaskId)
           if (target) {
             setSelectedTask(target)
             router.replace(`/projects/${projectId}`)
           }
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      } catch {
+        // ignore — board shows empty state
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadAll()
+    return () => { cancelled = true }
   }, [projectId, initialTaskId, router])
 
   useEffect(() => {
@@ -295,7 +335,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     if (!modalStatus) return
 
     const optimistic: Task = {
-      id: `temp-${Date.now()}`,
+      id: `temp-${crypto.randomUUID()}`,
       projectId,
       title: data.title,
       status: modalStatus,
@@ -330,10 +370,28 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
         dependencyIds: data.dependencyIds,
       })
       .then((res) => {
-        setTasks((prev) => prev.map((t) => (t.id === optimistic.id ? res.task : t)))
+        // Merge optimistic fields that the raw INSERT .returning() may not include
+        // (e.g. assignedTo, tags — kept in sync from what the user typed in the modal)
+        const confirmed: Task = {
+          ...optimistic,
+          ...res.task,
+          assignedTo: res.task.assignedTo?.length ? res.task.assignedTo : optimistic.assignedTo,
+          configuration: {
+            ...optimistic.configuration,
+            ...res.task.configuration,
+          },
+        }
+        setTasks((prev) => prev.map((t) => (t.id === optimistic.id ? confirmed : t)))
         window.dispatchEvent(new CustomEvent("app:activityRefresh"))
         if (data.files.length > 0) {
-          Promise.allSettled(data.files.map((f) => api.attachments.upload(res.task.id, f))).catch(() => {})
+          data.files.forEach(async (f) => {
+            try {
+              await api.attachments.upload(res.task.id, f)
+              // Creator is excluded from their own attachment.created WS events,
+              // so increment the count locally as each upload confirms.
+              handleAttachmentUploaded(res.task.id)
+            } catch { /* silent — individual upload failure doesn't block others */ }
+          })
         }
       })
       .catch(() => setTasks((prev) => prev.filter((t) => t.id !== optimistic.id)))

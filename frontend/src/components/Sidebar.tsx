@@ -31,7 +31,7 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
-  const [currentUser] = useState<{ id: string; name: string; email: string } | null>(getStoredUser)
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string } | null>(null)
   const [notifs, setNotifs] = useState<Notification[]>([])
   const [showNotifs, setShowNotifs] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
@@ -49,6 +49,7 @@ export function Sidebar() {
   }, [])
 
   useEffect(() => {
+    setCurrentUser(getStoredUser())
     loadProjects()
     loadNotifs()
   }, [loadProjects, loadNotifs])
@@ -86,10 +87,10 @@ export function Sidebar() {
     <aside className="w-60 h-full bg-[#0E0D0C] text-white flex flex-col shrink-0">
       <div className="px-5 py-4 border-b border-white/10">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+          <Link href="/projects" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
             <HappyRobotLogo />
             <span className="text-sm font-semibold tracking-tight">HappyRobot</span>
-          </div>
+          </Link>
 
           {/* Notification bell */}
           <div className="relative">
@@ -144,19 +145,19 @@ export function Sidebar() {
                 <li key={project.id} className="group relative">
                   <Link
                     href={`/projects/${project.id}`}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors pr-8 ${
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
                       isActive
                         ? "bg-white/15 text-white font-medium"
                         : "text-white/50 hover:bg-white/8 hover:text-white/80"
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-white/40 shrink-0" />
-                    <span className="truncate">{project.name}</span>
+                    <span>{project.name.length > 14 ? `${project.name.slice(0, 14)}…` : project.name}</span>
                   </Link>
                   {isOwner && (
                     <button
                       onClick={(e) => { e.preventDefault(); setPendingDelete(project) }}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-white/0 group-hover:text-white/30 hover:!text-red-400 transition-colors"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-1 rounded opacity-0 group-hover:opacity-100 text-white/60 hover:text-red-400 hover:bg-red-500/10 transition-all"
                       title="Delete project"
                     >
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">

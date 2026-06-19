@@ -98,11 +98,10 @@ Tasks declare dependencies on other tasks, rendered as a directed acyclic graph.
 ---
 
 ## Architecture Decisions
-**Data Model Diagram**
+### Data Model Diagram
 <img width="750" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
 
-**Container Diagram**
-Information on how the systems are interacting with one another
+###  Container Diagram
 <img width="646" height="779" alt="image" src="https://github.com/user-attachments/assets/0e6891e8-d28e-42f0-a145-4b362fffde77" />
 
 
@@ -203,13 +202,13 @@ A query like "fetch all tasks for project X sorted by creation time" does a full
 
 After indexes, connection limits become the problem. Postgres has a hard ceiling on concurrent connections. With many servers each holding a connection pool, that ceiling is hit fast. **PgBouncer** sits in front of Postgres and multiplexes thousands of application connections into a smaller number of real database connections, with no application code changes.
 
-The `events` table also needs partitioning. Splitting by month means old data can be archived to S3 as Parquet and dropped from Postgres instantly by detaching a partition rather than running a slow DELETE across millions of rows. The cold data stays queryable via Athena if needed for audits.
+The `events` table also needs **partitioning**. Splitting by month means old data can be archived to S3 as Parquet and dropped from Postgres instantly by detaching a partition rather than running a slow DELETE across millions of rows. The cold data stays queryable via Athena if needed for audits.
 
 **At hyperscale**
 
-Redis pub/sub starts to crack at very high throughput as it's single-threaded, and messages that aren't consumed when delivered are just gone. I'd replace it with Kafka; durable, ordered, and each consumer (analytics pipeline, notification service, search indexer) gets its own independent offset so they can read at their own pace without affecting each other or losing events on restart.
+Redis pub/sub starts to break at very high throughput as it's single-threaded, and messages that aren't consumed when delivered are just gone. I'd replace it with **Kafka**; durable, ordered, and each consumer (analytics pipeline, notification service, search indexer) gets its own independent offset so they can read at their own pace without affecting each other or losing events on restart.
 
-Geographic routing matters too. Latency in collaborative editing is felt immediately — a 200ms round trip is noticeable when watching a cursor move. I'd route users to the nearest region, with `projectId` sharding keeping a project's members co-located within that region.
+**Geographic routing** matters too. Latency in collaborative editing is felt immediately — a 200ms round trip is noticeable when watching a cursor move. I'd route users to the nearest region, with `projectId` sharding keeping a project's members co-located within that region.
 
 
 ## Tradeoffs Made
