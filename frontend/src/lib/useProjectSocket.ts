@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useRef, useCallback } from "react"
-import type { Task, Comment, Attachment } from "./types"
+import type { Task, Comment, Attachment, Project } from "./types"
+import { isActive } from "./activityTracker"
 
 export interface PresenceUser {
   userId: string
   name: string
+  mode?: "viewing" | "editing"
 }
 
 export type SocketEvent =
@@ -16,6 +18,13 @@ export type SocketEvent =
   | { type: "presence.updated"; taskId: string; users: PresenceUser[] }
   | { type: "attachment.created"; taskId: string; attachment: Attachment }
   | { type: "attachment.deleted"; taskId: string; attachmentId: string }
+  | { type: "yjs.sync.init"; taskId: string; state: string }
+  | { type: "yjs.update"; taskId: string; update: string }
+  | { type: "awareness.update"; taskId: string; update: string }
+  | { type: "project.online"; userIds: string[] }
+  | { type: "project.updated"; project: Project }
+  | { type: "presence.mode"; taskId: string; userId: string; mode: "viewing" | "editing" }
+  | { type: "notification.created"; notification: import("./types").Notification & { fromUserName?: string } }
 
 interface Options {
   projectId: string
@@ -39,16 +48,17 @@ export function useProjectSocket({ projectId, onEvent }: Options) {
   useEffect(() => {
     mountedRef.current = true
 
-    // function declaration is hoisted within this effect scope — safe to self-reference
     function connect() {
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
-      if (!token) return
+      // skip if not logged in — prevents infinite reconnect before the auth redirect fires
+      if (!localStorage.getItem("currentUser")) return
 
-      const ws = new WebSocket(`${WS_URL}/ws?token=${token}&projectId=${projectId}`)
+      const ws = new WebSocket(`${WS_URL}/ws?projectId=${projectId}`)
       wsRef.current = ws
 
       ws.onopen = () => {
         backoffRef.current = 1_000
+        // open modals must re-announce presence — server's client object is fresh after reconnect
+        window.dispatchEvent(new CustomEvent("ws:reconnected"))
       }
 
       ws.onmessage = (e) => {
@@ -60,8 +70,10 @@ export function useProjectSocket({ projectId, onEvent }: Options) {
         }
       }
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (!mountedRef.current) return
+        // 1008 = auth rejected (bad/revoked token) — stop retrying
+        if (event.code === 1008) return
         reconnectTimer.current = setTimeout(() => {
           backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF)
           connect()
@@ -71,12 +83,37 @@ export function useProjectSocket({ projectId, onEvent }: Options) {
       ws.onerror = () => ws.close()
     }
 
-    connect()
+    const sendOfflineAndClose = (ws: WebSocket | null) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        // data frame arrives before the WS close handshake — server acts immediately even on tab kill
+        ws.send(JSON.stringify({ type: "presence.offline" }))
+      }
+      ws?.close()
+    }
 
-    return () => {
+    const closeNow = () => {
       mountedRef.current = false
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
+      sendOfflineAndClose(wsRef.current)
+    }
+
+    const handleUnload = () => sendOfflineAndClose(wsRef.current)
+
+    window.addEventListener("app:logout", closeNow)
+    window.addEventListener("beforeunload", handleUnload)
+    connect()
+
+    const pingInterval = setInterval(() => {
+      if (isActive() && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "project.ping" }))
+      }
+    }, 30_000)
+
+    return () => {
+      window.removeEventListener("app:logout", closeNow)
+      window.removeEventListener("beforeunload", handleUnload)
+      clearInterval(pingInterval)
+      closeNow()
     }
   }, [projectId])
 
@@ -98,5 +135,5 @@ export function useProjectSocket({ projectId, onEvent }: Options) {
     send({ type: "presence.ping", taskId })
   }, [send])
 
-  return { joinTask, leaveTask, heartbeat }
+  return { joinTask, leaveTask, heartbeat, sendRaw: send }
 }
