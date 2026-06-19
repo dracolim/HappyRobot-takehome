@@ -42,15 +42,24 @@ const yjsDocs = new Map<string, { doc: Y.Doc; projectId: string; lastUsedAt: num
 const yjsSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 async function getOrCreateYjsDoc(taskId: string, projectId: string): Promise<Y.Doc> {
-  const entry = yjsDocs.get(taskId)
-  if (entry) {
-    entry.lastUsedAt = Date.now()
-    return entry.doc
-  }
-  const [row] = await db.select({ configuration: tasks.configuration }).from(tasks).where(eq(tasks.id, taskId))
+  let entry = yjsDocs.get(taskId)
+  if (entry) { entry.lastUsedAt = Date.now(); return entry.doc }
+
+  const saved = await presenceRedis.getBuffer(`yjs:${taskId}`)
+  entry = yjsDocs.get(taskId)
+  if (entry) { entry.lastUsedAt = Date.now(); return entry.doc }
+
   const doc = new Y.Doc()
-  const description = row?.configuration?.description ?? ""
-  if (description) doc.getText("description").insert(0, description)
+  if (saved) {
+    Y.applyUpdate(doc, saved)
+  } else {
+    const [row] = await db.select({ configuration: tasks.configuration }).from(tasks).where(eq(tasks.id, taskId))
+    entry = yjsDocs.get(taskId)
+    if (entry) { entry.lastUsedAt = Date.now(); return entry.doc }
+
+    const description = row?.configuration?.description ?? ""
+    if (description) doc.getText("description").insert(0, description)
+  }
   yjsDocs.set(taskId, { doc, projectId, lastUsedAt: Date.now() })
   return doc
 }
@@ -63,9 +72,13 @@ async function flushAndEvictYjsDoc(taskId: string): Promise<void> {
     clearTimeout(saveTimer)
     yjsSaveTimers.delete(taskId)
     const description = entry.doc.getText("description").toString()
-    await db.execute(
-      sql`UPDATE tasks SET configuration = jsonb_set(configuration, '{description}', to_jsonb(${description}::text)), updated_at = NOW() WHERE id = ${taskId}`
-    ).catch(err => console.error("[YJS evict flush]", err))
+    const binState = Y.encodeStateAsUpdate(entry.doc)
+    await Promise.all([
+      presenceRedis.set(`yjs:${taskId}`, Buffer.from(binState)),
+      db.execute(
+        sql`UPDATE tasks SET configuration = jsonb_set(configuration, '{description}', to_jsonb(${description}::text)), updated_at = NOW() WHERE id = ${taskId}`
+      ),
+    ]).catch(err => console.error("[YJS evict flush]", err))
   }
   yjsDocs.delete(taskId)
 }
@@ -79,12 +92,14 @@ function scheduleYjsSave(taskId: string): void {
     const e = yjsDocs.get(taskId)
     if (!e) return
     const description = e.doc.getText("description").toString()
+    const binState = Y.encodeStateAsUpdate(e.doc)
     try {
-      // jsonb_set updates only the description key — avoids a read-modify-write race
-      // with concurrent PATCH requests that update tags or other config fields.
-      await db.execute(
-        sql`UPDATE tasks SET configuration = jsonb_set(configuration, '{description}', to_jsonb(${description}::text)), updated_at = NOW() WHERE id = ${taskId}`
-      )
+      await Promise.all([
+        presenceRedis.set(`yjs:${taskId}`, Buffer.from(binState)),
+        db.execute(
+          sql`UPDATE tasks SET configuration = jsonb_set(configuration, '{description}', to_jsonb(${description}::text)), updated_at = NOW() WHERE id = ${taskId}`
+        ),
+      ])
     } catch (err) {
       console.error("[YJS save]", err)
     }

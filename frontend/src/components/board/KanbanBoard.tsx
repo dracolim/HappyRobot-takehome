@@ -200,12 +200,6 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       const mergeTask = (existing: Task): Task => ({
         ...existing,
         ...event.task,
-        configuration: {
-          priority: event.task.configuration.priority,
-          tags: event.task.configuration.tags,
-          customFields: event.task.configuration.customFields,
-          description: existing.configuration.description,
-        },
       })
       setTasks((prev) => prev.map((t) => (t.id === event.task.id ? mergeTask(t) : t)))
       setSelectedTask((prev) => (prev?.id === event.task.id ? mergeTask(prev) : prev))

@@ -332,8 +332,6 @@ export function TaskDetailModal({ task, allTasks, onClose, onSave, onDelete, onO
   }, [onClose, previewAttachment])
 
   const cancelEdit = () => {
-    // Revert Yjs doc to last-saved description BEFORE clearing isEditing,
-    // so the revert delta is still broadcast to collaborators.
     revertContent(task.configuration.description ?? "")
     reset()
     setEditTagInput("")

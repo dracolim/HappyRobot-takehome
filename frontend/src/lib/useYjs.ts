@@ -60,20 +60,18 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
   const yTextRef = useRef<Y.Text | null>(null)
   const awarenessRef = useRef<Awareness | null>(null)
   const applyingRemote = useRef(false)
+  const syncedRef = useRef(false)
   const [content, setContent] = useState(initialContent)
   const [cursorPeers, setCursorPeers] = useState<CursorPeer[]>([])
   const enabledRef = useRef(enabled)
   useEffect(() => { enabledRef.current = enabled }, [enabled])
 
   useEffect(() => {
-    if (!enabled) {
-      const awareness = awarenessRef.current
-      if (awareness) awareness.setLocalStateField("cursor", null)
-      setCursorPeers([])
-    }
+    if (!enabled) awarenessRef.current?.setLocalStateField("cursor", null)
   }, [enabled])
 
   useEffect(() => {
+    syncedRef.current = false
     const doc = new Y.Doc()
     const yText = doc.getText("description")
     const awareness = new Awareness(doc)
@@ -134,6 +132,7 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
         applyingRemote.current = true
         Y.applyUpdate(doc, base64ToUint8(event.state))
         applyingRemote.current = false
+        syncedRef.current = true
       } else if (event.type === "yjs.update" && event.taskId === taskId) {
         applyingRemote.current = true
         Y.applyUpdate(doc, base64ToUint8(event.update))
@@ -161,6 +160,7 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
   }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const applyAndBroadcast = useCallback((newValue: string) => {
+    if (!syncedRef.current) return
     const yText = yTextRef.current
     const doc = docRef.current
     if (!yText || !doc) return
@@ -176,12 +176,10 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
 
   const onChange = useCallback((newValue: string) => {
     if (!enabledRef.current) return
-    const yText = yTextRef.current
-    if (!yText) { setContent(newValue); return }
+    if (!syncedRef.current) { setContent(newValue); return }
     applyAndBroadcast(newValue)
   }, [applyAndBroadcast])
 
-  // broadcasts the revert to collaborators — must be called before isEditing transitions to false
   const revertContent = useCallback((savedValue: string) => {
     applyAndBroadcast(savedValue)
   }, [applyAndBroadcast])
@@ -197,5 +195,5 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
     awareness.setLocalStateField("cursor", { relPos: Y.relativePositionToJSON(relPos), index: position })
   }, [])
 
-  return { content, onChange, onCursorMove, cursorPeers, revertContent }
+  return { content, onChange, onCursorMove, cursorPeers: enabled ? cursorPeers : [], revertContent }
 }
