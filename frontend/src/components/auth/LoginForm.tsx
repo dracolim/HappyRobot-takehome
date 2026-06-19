@@ -26,8 +26,8 @@ export function LoginForm() {
     setSubmitting(true)
     setError("")
     try {
-      const { token } = await api.auth.login({ email, password })
-      localStorage.setItem("token", token)
+      const { user } = await api.auth.login({ email, password })
+      localStorage.setItem("currentUser", JSON.stringify(user))
       router.push("/projects")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid email or password")

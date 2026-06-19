@@ -18,6 +18,7 @@ export function NewProjectForm() {
     setError("")
     try {
       const { project } = await api.projects.create({ name: name.trim(), description: description.trim() })
+      window.dispatchEvent(new CustomEvent("app:projectCreated"))
       router.push(`/projects/${project.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create project")

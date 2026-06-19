@@ -60,6 +60,31 @@ export interface ProjectMember {
   joinedAt: string
 }
 
+export interface Notification {
+  id: string
+  type: "mention"
+  projectId: string
+  taskId: string | null
+  commentId: string | null
+  fromUserId: string | null
+  fromUserName?: string | null
+  body: string
+  read: boolean
+  createdAt: string
+}
+
+export interface ActivityEvent {
+  id: string
+  type: string
+  actorId: string | null
+  actorName: string
+  taskId: string | null
+  taskTitle: string | null
+  description: string
+  createdAt: string
+  undoBefore: Record<string, unknown> | null
+}
+
 export const COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "todo", label: "To Do" },
   { id: "in_progress", label: "In Progress" },

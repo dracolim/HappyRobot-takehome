@@ -1,26 +1,20 @@
-import type { RegisterInput, LoginInput, CreateProjectInput, CreateTaskInput, UpdateTaskInput, InviteMemberInput } from "@happyrobot/shared"
-import type { Project, Task, Comment, ProjectMember, Attachment } from "./types"
+import type { RegisterInput, LoginInput, CreateProjectInput, UpdateProjectInput, CreateTaskInput, UpdateTaskInput, InviteMemberInput } from "@happyrobot/shared"
+import type { Project, Task, Comment, ProjectMember, Attachment, Notification, ActivityEvent } from "./types"
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null
-  return localStorage.getItem("token")
-}
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken()
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   })
 
   if (res.status === 401) {
-    localStorage.removeItem("token")
+    localStorage.removeItem("currentUser")
     window.location.href = "/login"
     throw new Error("Unauthorized")
   }
@@ -39,15 +33,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   auth: {
     register: (body: RegisterInput) =>
-      request<{ token: string; user: { id: string; email: string; name: string } }>("/api/auth/register", {
+      request<{ user: { id: string; email: string; name: string } }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify(body),
       }),
     login: (body: LoginInput) =>
-      request<{ token: string; user: { id: string; email: string; name: string } }>("/api/auth/login", {
+      request<{ user: { id: string; email: string; name: string } }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   },
   projects: {
     list: () => request<{ projects: Project[] }>("/api/projects"),
@@ -57,6 +52,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    update: (id: string, body: UpdateProjectInput) =>
+      request<{ project: Project }>(`/api/projects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<void>(`/api/projects/${id}`, { method: "DELETE" }),
   },
   members: {
     list: (projectId: string) =>
@@ -100,24 +102,29 @@ export const api = {
     list: (taskId: string) =>
       request<{ attachments: Attachment[] }>(`/api/tasks/${taskId}/attachments`),
     upload: async (taskId: string, file: File): Promise<{ attachment: Attachment }> => {
-      const token = getToken()
-      const form = new FormData()
-      form.append("file", file)
-      const res = await fetch(`${BASE_URL}/api/tasks/${taskId}/attachments`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
+      // Step 1: get a short-lived presigned PUT URL from the backend
+      const { presignedUrl, objectKey } = await request<{ presignedUrl: string; objectKey: string }>(
+        `/api/tasks/${taskId}/attachments/presign`,
+        { method: "POST", body: JSON.stringify({ filename: file.name, mimeType: file.type }) },
+      )
+
+      // Step 2: upload directly to MinIO/R2 — backend is not in the data path
+      const putRes = await fetch(presignedUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error ?? "Upload failed")
-      }
-      return res.json()
+      if (!putRes.ok) throw new Error("Upload to storage failed")
+
+      // Step 3: confirm with backend so it registers in DB and broadcasts WS event
+      return request<{ attachment: Attachment }>(
+        `/api/tasks/${taskId}/attachments/confirm`,
+        { method: "POST", body: JSON.stringify({ objectKey, filename: file.name, size: file.size, mimeType: file.type }) },
+      )
     },
     fetchBlobUrl: async (attachmentId: string): Promise<string> => {
-      const token = getToken()
       const res = await fetch(`${BASE_URL}/api/attachments/${attachmentId}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
       })
       if (!res.ok) throw new Error("Failed to fetch")
       return URL.createObjectURL(await res.blob())
@@ -132,5 +139,14 @@ export const api = {
     },
     delete: (attachmentId: string) =>
       request<void>(`/api/attachments/${attachmentId}`, { method: "DELETE" }),
+  },
+  notifications: {
+    list: () => request<{ notifications: Notification[]; unreadCount: number }>("/api/notifications"),
+    markRead: (id: string) => request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+    markAllRead: () => request<{ ok: boolean }>("/api/notifications/read-all", { method: "PATCH" }),
+  },
+  activity: {
+    list: (projectId: string) =>
+      request<{ events: ActivityEvent[] }>(`/api/projects/${projectId}/activity`),
   },
 }

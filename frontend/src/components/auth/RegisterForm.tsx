@@ -27,8 +27,8 @@ export function RegisterForm() {
     setSubmitting(true)
     setError("")
     try {
-      const { token } = await api.auth.register({ name, email, password })
-      localStorage.setItem("token", token)
+      const { user } = await api.auth.register({ name, email, password })
+      localStorage.setItem("currentUser", JSON.stringify(user))
       router.push("/projects")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed")
