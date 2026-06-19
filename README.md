@@ -70,8 +70,6 @@ Cursor positions are shared via `y-protocols/awareness`. Each cursor is anchored
 **Collaborative text editing**
 The task description uses Yjs CRDT. Multiple users can type simultaneously and edits always converge to the same result. Saving is explicit — clicking Save commits the change; Cancel reverts the document and broadcasts the revert to all collaborators.
 <br/>
-<img width="1704" height="908" alt="Screenshot 2026-06-19 at 10 16 40 AM" src="https://github.com/user-attachments/assets/b4c4cb93-8fa7-4bab-ba49-573369895571" />
-
 <img width="1170" height="794" alt="Screenshot 2026-06-19 at 10 15 41 AM" src="https://github.com/user-attachments/assets/3a6cac80-bd2d-4676-86fa-979cc998a25d" />
 
 **Activity feed with real-time notifications**
