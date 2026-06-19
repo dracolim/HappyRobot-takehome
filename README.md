@@ -72,11 +72,13 @@ The task description uses Yjs CRDT. Multiple users can type simultaneously and e
 
 **Activity feed with real-time notifications**
 Every task mutation is written to an append-only `events` table and broadcast as a socket event. The sidebar feed updates live and shows exactly what changed: `moved from To Do → In Review`, `renamed "Old" → "New"`.
+
 <img width="323" height="912" alt="Screenshot 2026-06-19 at 9 32 20 AM" src="https://github.com/user-attachments/assets/93787220-80f6-44a3-bfdf-b2022a6bdcd5" />
 
 
 **@mentions with notifications**
 `@name` patterns in comments are parsed on the backend. Mentioned members receive an in-app notification over WebSocket, persisted in the `notifications` table across sessions.
+<br/>
 <img width="433" height="148" alt="Screenshot 2026-06-19 at 9 31 38 AM" src="https://github.com/user-attachments/assets/c56176a0-f4d3-46fb-88ff-dd5f8136e709" />
 <img width="423" height="768" alt="Screenshot 2026-06-19 at 9 32 05 AM" src="https://github.com/user-attachments/assets/1639459b-27a5-412e-970c-209118515267" />
 
@@ -93,7 +95,7 @@ Tasks declare dependencies on other tasks, rendered as a directed acyclic graph.
 
 ## Architecture Decisions
 **Data Model Diagram**
-<img width="1200" height="2500" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
+<img width="850" height="1000" alt="image" src="https://github.com/user-attachments/assets/13a331e1-bf65-46fe-bd22-c95bc9b926f9" />
 
 
 **REST for writes + WebSocket for push, backed by Redis pub/sub.**
