@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express"
 import { db } from "../db"
-import { tasks, taskDependencies, comments, attachments, projectMembers } from "../db/schema"
-import { and, eq, lt, desc, inArray, count } from "drizzle-orm"
+import { tasks, taskDependencies, comments, attachments, projectMembers, events } from "../db/schema"
+import { and, eq, lt, desc, inArray, count, sql } from "drizzle-orm"
 import { broadcast } from "../ws/manager"
 import type { AuthRequest } from "../middleware/auth"
 import { CreateTaskSchema, UpdateTaskSchema } from "@happyrobot/shared"
@@ -122,6 +122,15 @@ router.post("/:projectId/tasks", async (req: Request, res: Response): Promise<vo
         )
       }
 
+      await tx.insert(events).values({
+        projectId,
+        taskId: created.id,
+        userId,
+        type: "task.created",
+        payload: { after: { title: created.title, status: created.status, assignedTo: created.assignedTo, configuration: created.configuration } },
+        revision: created.revision,
+      })
+
       return created
     })
 
@@ -143,16 +152,16 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
     if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }); return }
 
     const { dependencyIds, configuration: configUpdate, ...fields } = parsed.data
-    const clientUpdatedAt = req.body.updatedAt as string | undefined
 
     const [existing] = await db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!existing) { res.status(404).json({ error: "Not found" }); return }
 
-    // optimistic locking — reject if client's version is stale
-    if (clientUpdatedAt && new Date(clientUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
-      res.status(409).json({ error: "Task was modified by someone else, please refresh" })
-      return
-    }
+    // fetch before-state for the activity log; business logic doesn't use it
+    const existingDepIds = dependencyIds !== undefined
+      ? (await db.select({ dependsOnId: taskDependencies.dependsOnId })
+          .from(taskDependencies).where(eq(taskDependencies.taskId, taskId)))
+          .map(d => d.dependsOnId)
+      : []
 
     if (fields.status && fields.status !== existing.status) {
       if (!canTransition(existing.status as TaskStatus, fields.status)) {
@@ -191,14 +200,14 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
       : undefined
 
     const updatedTask = await db.transaction(async (tx) => {
-      // conditional WHERE: if changing status, only succeed if current status still matches
+      // optimistic concurrency: match current status so concurrent writes conflict instead of silently overwriting
       const whereClause = fields.status
         ? and(eq(tasks.id, taskId), eq(tasks.status, existing.status))
         : eq(tasks.id, taskId)
 
       const [task] = await tx
         .update(tasks)
-        .set({ ...fields, ...(mergedConfig !== undefined ? { configuration: mergedConfig } : {}), updatedAt: new Date() })
+        .set({ ...fields, ...(mergedConfig !== undefined ? { configuration: mergedConfig } : {}), updatedAt: new Date(), revision: sql`${tasks.revision} + 1` })
         .where(whereClause)
         .returning()
 
@@ -216,11 +225,30 @@ router.patch("/:projectId/tasks/:taskId", async (req: Request, res: Response): P
         }
       }
 
+      const before: Record<string, unknown> = {}
+      const after: Record<string, unknown> = {}
+      if (fields.title !== undefined) { before.title = existing.title; after.title = fields.title }
+      if (fields.status !== undefined) { before.status = existing.status; after.status = fields.status }
+      if (fields.assignedTo !== undefined) { before.assignedTo = existing.assignedTo; after.assignedTo = fields.assignedTo }
+      if (configUpdate !== undefined) { before.configuration = existing.configuration; after.configuration = task.configuration }
+      if (dependencyIds !== undefined) { before.dependencyIds = existingDepIds; after.dependencyIds = dependencyIds }
+
+      await tx.insert(events).values({ projectId, taskId, userId, type: "task.updated", payload: { before, after }, revision: task.revision })
+
       return task
     })
 
     const [withDeps] = await attachDependencies([updatedTask])
-    const [withAll] = await attachCommentCounts([withDeps])
+    const [withComments] = await attachCounts(
+      [withDeps],
+      (ids) => db.select({ taskId: comments.taskId, n: count() }).from(comments).where(inArray(comments.taskId, ids)).groupBy(comments.taskId),
+      "commentCount",
+    )
+    const [withAll] = await attachCounts(
+      [withComments],
+      (ids) => db.select({ taskId: attachments.taskId, n: count() }).from(attachments).where(inArray(attachments.taskId, ids)).groupBy(attachments.taskId),
+      "attachmentCount",
+    )
     broadcast(projectId, { type: "task.updated", task: withAll }, userId).catch(() => {})
     res.json({ task: withAll })
   } catch (err) {
@@ -237,7 +265,22 @@ router.delete("/:projectId/tasks/:taskId", async (req: Request, res: Response): 
   try {
     const { userId } = req as AuthRequest
     const { projectId, taskId } = req.params
-    await db.delete(tasks).where(eq(tasks.id, taskId))
+
+    const [existing] = await db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (!existing) { res.status(404).json({ error: "Not found" }); return }
+
+    await db.transaction(async (tx) => {
+      await tx.insert(events).values({
+        projectId,
+        taskId,
+        userId,
+        type: "task.deleted",
+        payload: { before: { id: taskId, title: existing.title, status: existing.status } },
+        revision: null,
+      })
+      await tx.delete(tasks).where(eq(tasks.id, taskId))
+    })
+
     broadcast(projectId, { type: "task.deleted", taskId }, userId).catch(() => {})
     res.status(204).end()
   } catch (err) {

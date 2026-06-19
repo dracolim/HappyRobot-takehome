@@ -3,7 +3,8 @@ import { db } from "../db"
 import { projects, projectMembers, users } from "../db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import type { AuthRequest } from "../middleware/auth"
-import { CreateProjectSchema, InviteMemberSchema } from "@happyrobot/shared"
+import { CreateProjectSchema, UpdateProjectSchema, InviteMemberSchema } from "@happyrobot/shared"
+import { broadcast } from "../ws/manager"
 
 const router = Router()
 
@@ -71,6 +72,9 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
 router.patch("/:id", async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = req as AuthRequest
+    const parsed = UpdateProjectSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ error: "Invalid input" }); return }
+
     const [member] = await db
       .select()
       .from(projectMembers)
@@ -80,11 +84,13 @@ router.patch("/:id", async (req: Request, res: Response): Promise<void> => {
 
     const [project] = await db
       .update(projects)
-      .set({ ...req.body, updatedAt: new Date() })
+      .set({ ...parsed.data, updatedAt: new Date() })
       .where(eq(projects.id, req.params.id))
       .returning()
 
     if (!project) { res.status(404).json({ error: "Not found" }); return }
+
+    broadcast(req.params.id, { type: "project.updated", project }, userId).catch(() => {})
     res.json({ project })
   } catch (err) {
     console.error("[PATCH project]", err)
