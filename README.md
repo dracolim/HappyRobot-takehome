@@ -148,6 +148,8 @@ The description field uses Yjs.
 | High availability | Any       | Redis SPOF, pod crash data loss             | Redis Sentinel + `y-redis` Streams                                  |
 | Hyperscale        | 100k+     | WebSocket fan-out, DB write load            | Kafka; managed real-time layer; geographic sharding                 |
 
+<img width="1661" height="481" alt="image" src="https://github.com/user-attachments/assets/7ce59d9a-e388-4ca0-a4ab-edb133df87d7" />
+
 **Scaling the real-time layer**
 
 Since REST is stateless, I'd **add more servers behind a load balancer**.
