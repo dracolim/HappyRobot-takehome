@@ -192,7 +192,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
       yjsHandlerRef.current?.(event)
     }
     if (event.type === "task.created") {
-      setTasks((prev) => [...prev, event.task])
+      setTasks((prev) => prev.some((t) => t.id === event.task.id) ? prev : [...prev, event.task])
     } else if (event.type === "task.updated") {
       // description is managed by Yjs and stripped from broadcast payloads; preserve the local value
       const mergeTask = (existing: Task): Task => ({

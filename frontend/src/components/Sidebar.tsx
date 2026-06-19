@@ -31,7 +31,7 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
-  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email: string } | null>(null)
+  const [currentUser] = useState<{ id: string; name: string; email: string } | null>(getStoredUser)
   const [notifs, setNotifs] = useState<Notification[]>([])
   const [showNotifs, setShowNotifs] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
@@ -49,7 +49,6 @@ export function Sidebar() {
   }, [])
 
   useEffect(() => {
-    setCurrentUser(getStoredUser())
     loadProjects()
     loadNotifs()
   }, [loadProjects, loadNotifs])
