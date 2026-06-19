@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { useDraggable } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
 import type { Task, TaskStatus } from "@/lib/types"
@@ -37,11 +38,11 @@ interface Props {
   task: Task
   blockingCount: number
   viewers: PresenceUser[]
-  onClick?: () => void
+  onSelect?: (task: Task) => void
   draggable?: boolean
 }
 
-export function TaskCard({ task, blockingCount, viewers, onClick, draggable = false }: Props) {
+export const TaskCard = memo(function TaskCard({ task, blockingCount, viewers, onSelect, draggable = false }: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     disabled: !draggable,
@@ -61,7 +62,7 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
       ref={setNodeRef}
       style={{ transform: isDragging ? undefined : CSS.Transform.toString(transform), opacity: isDragging ? 0 : 1 }}
       {...(draggable ? { ...attributes, ...listeners } : {})}
-      onClick={onClick}
+      onClick={() => onSelect?.(task)}
       className={`bg-white rounded-xl p-5 border cursor-pointer hover:shadow-md transition-all ${hasViewers ? "border-blue-400 shadow-sm shadow-blue-100" : "border-black/[0.06] hover:border-black/10"}`}
     >
       {hasViewers && (
@@ -169,4 +170,4 @@ export function TaskCard({ task, blockingCount, viewers, onClick, draggable = fa
       </div>
     </div>
   )
-}
+})

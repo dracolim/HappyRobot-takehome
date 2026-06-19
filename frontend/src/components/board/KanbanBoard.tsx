@@ -235,16 +235,14 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     } else if (event.type === "member.added") {
       if (event.projectId === projectId) {
         setMembers((prev) => prev.some((m) => m.userId === event.member.userId) ? prev : [...prev, event.member])
-      } else {
-        window.dispatchEvent(new CustomEvent("app:projectCreated"))
       }
     } else if (event.type === "member.removed") {
       if (event.projectId === projectId) {
         setMembers((prev) => prev.filter((m) => m.userId !== event.userId))
         if (event.userId === currentUserId) router.push("/projects")
-      } else {
-        window.dispatchEvent(new CustomEvent("app:projectCreated"))
       }
+    } else if (event.type === "project.deleted") {
+      if (event.projectId === projectId) router.push("/projects")
     } else if (event.type === "notification.created") {
       window.dispatchEvent(new CustomEvent("app:notification", { detail: event.notification }))
     } else if (event.type === "project.updated") {
@@ -257,7 +255,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
     if (ACTIVITY_EVENT_TYPES.has(event.type)) {
       setLatestEvent(event)
     }
-  }, [currentUserId])
+  }, [currentUserId, projectId, router])
 
   const { joinTask, leaveTask, heartbeat, sendRaw } = useProjectSocket({ projectId, onEvent: handleSocketEvent })
 
@@ -325,13 +323,21 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
 
   const tasksByStatus = useMemo(() => {
     const map = new Map<TaskStatus, Task[]>()
-    for (const t of tasks) {
-      const arr = map.get(t.status) ?? []
-      arr.push(t)
-      map.set(t.status, arr)
-    }
+    for (const col of COLUMNS) map.set(col.id, [])
+    for (const t of tasks) map.get(t.status)!.push(t)
     return map
   }, [tasks])
+
+  const handleSelectTask = useCallback((task: Task) => setSelectedTask(task), [])
+
+  const handleAddTaskByStatus = useMemo(() => {
+    const map = {} as Record<TaskStatus, () => void>
+    for (const col of COLUMNS) {
+      const status = col.id
+      map[status] = () => setModalStatus(status)
+    }
+    return map
+  }, [])
 
   const blockingCountMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -629,11 +635,11 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
                 key={col.id}
                 label={col.label}
                 status={col.id}
-                tasks={tasksByStatus.get(col.id) ?? []}
+                tasks={tasksByStatus.get(col.id)!}
                 blockingCountMap={blockingCountMap}
                 presenceMap={presenceMap}
-                onAddTask={() => setModalStatus(col.id)}
-                onSelectTask={(task) => setSelectedTask(task)}
+                onAddTask={handleAddTaskByStatus[col.id]}
+                onSelectTask={handleSelectTask}
                 isBlockedByDeps={col.id === "done" && activeDragBlockedByDeps.length > 0}
               />
             ))}
@@ -644,6 +650,7 @@ export function KanbanBoard({ projectId, projectName, projectDescription, initia
                 task={activeTask}
                 blockingCount={blockingCountMap.get(activeTask.id) ?? 0}
                 viewers={presenceMap.get(activeTask.id) ?? []}
+                draggable={false}
               />
             )}
           </DragOverlay>

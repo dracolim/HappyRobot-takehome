@@ -108,7 +108,23 @@ router.delete("/:id", async (req: Request, res: Response): Promise<void> => {
 
     if (!member || member.role !== "owner") { res.status(403).json({ error: "Only owners can delete projects" }); return }
 
+    const allMembers = await db
+      .select({ userId: projectMembers.userId })
+      .from(projectMembers)
+      .where(eq(projectMembers.projectId, req.params.id))
+
     await db.delete(projects).where(eq(projects.id, req.params.id))
+
+    const deletedProjectId = req.params.id
+    // users currently on this project's board
+    broadcast(deletedProjectId, { type: "project.deleted", projectId: deletedProjectId }, userId).catch(() => {})
+    // users on other project boards (sendToUser reaches any active WS connection)
+    for (const { userId: memberId } of allMembers) {
+      if (memberId !== userId) {
+        sendToUser(memberId, { type: "project.deleted", projectId: deletedProjectId }).catch(() => {})
+      }
+    }
+
     res.status(204).end()
   } catch (err) {
     console.error("[DELETE project]", err)

@@ -1,9 +1,12 @@
 "use client"
 
+import { memo } from "react"
 import { useDroppable } from "@dnd-kit/core"
 import type { Task, TaskStatus } from "@/lib/types"
 import type { PresenceUser } from "@/lib/useProjectSocket"
 import { TaskCard } from "./TaskCard"
+
+const EMPTY_VIEWERS: PresenceUser[] = []
 
 const columnIcon: Record<TaskStatus, React.ReactNode> = {
   todo: (
@@ -44,7 +47,7 @@ interface Props {
   isBlockedByDeps?: boolean
 }
 
-export function KanbanColumn({ label, status, tasks, blockingCountMap, presenceMap, onAddTask, onSelectTask, isBlockedByDeps = false }: Props) {
+export const KanbanColumn = memo(function KanbanColumn({ label, status, tasks, blockingCountMap, presenceMap, onAddTask, onSelectTask, isBlockedByDeps = false }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: status })
 
   return (
@@ -71,8 +74,8 @@ export function KanbanColumn({ label, status, tasks, blockingCountMap, presenceM
             key={task.id}
             task={task}
             blockingCount={blockingCountMap.get(task.id) ?? 0}
-            viewers={presenceMap.get(task.id) ?? []}
-            onClick={() => onSelectTask(task)}
+            viewers={presenceMap.get(task.id) ?? EMPTY_VIEWERS}
+            onSelect={onSelectTask}
             draggable
           />
         ))}
@@ -94,4 +97,4 @@ export function KanbanColumn({ label, status, tasks, blockingCountMap, presenceM
       </div>
     </div>
   )
-}
+})

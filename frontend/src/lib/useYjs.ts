@@ -93,7 +93,7 @@ export function useYjs({ taskId, initialContent, userId, enabled, sendRaw, onReg
         const position = absPos !== null ? absPos.index : state.cursor.index
         peers.push({ userId: state.userId, position })
       }
-      setCursorPeers(peers)
+      setCursorPeers(prev => peers.length === 0 && prev.length === 0 ? prev : peers)
     }
 
     awareness.on("change", recalcPeers)

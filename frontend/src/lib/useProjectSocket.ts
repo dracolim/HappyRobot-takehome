@@ -27,6 +27,7 @@ export type SocketEvent =
   | { type: "member.removed"; projectId: string; userId: string }
   | { type: "presence.mode"; taskId: string; userId: string; mode: "viewing" | "editing" }
   | { type: "notification.created"; notification: import("./types").Notification & { fromUserName?: string } }
+  | { type: "project.deleted"; projectId: string }
 
 interface Options {
   projectId: string

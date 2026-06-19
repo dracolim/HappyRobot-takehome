@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState, useCallback } from "react"
 import { api } from "@/lib/api"
 import type { Project, Notification } from "@/lib/types"
+import { useUserSocket } from "@/lib/useUserSocket"
 import { NotificationPanel } from "./NotificationPanel"
 import { ConfirmModal } from "./ConfirmModal"
 
@@ -52,6 +53,20 @@ export function Sidebar() {
     loadProjects()
     loadNotifs()
   }, [loadProjects, loadNotifs])
+
+  useUserSocket(useCallback((event) => {
+    if (event.type === "member.added") {
+      loadProjects()
+    } else if (event.type === "member.removed") {
+      if (event.userId === currentUser?.id) {
+        setProjects(prev => prev.filter(p => p.id !== event.projectId))
+      }
+    } else if (event.type === "project.deleted") {
+      setProjects(prev => prev.filter(p => p.id !== event.projectId))
+    } else if (event.type === "notification.created") {
+      window.dispatchEvent(new CustomEvent("app:notification", { detail: event.notification }))
+    }
+  }, [loadProjects, currentUser?.id]))
 
   useEffect(() => {
     window.addEventListener("app:projectCreated", loadProjects)
