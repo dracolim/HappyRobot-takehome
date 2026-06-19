@@ -1,6 +1,7 @@
 import "dotenv/config"
 import express from "express"
 import cors from "cors"
+import cookieParser from "cookie-parser"
 import rateLimit from "express-rate-limit"
 import { createServer } from "http"
 import { authRouter } from "./routes/auth"
@@ -8,6 +9,8 @@ import { projectsRouter } from "./routes/projects"
 import { tasksRouter } from "./routes/tasks"
 import { commentsRouter } from "./routes/comments"
 import { taskAttachmentsRouter, attachmentRouter } from "./routes/attachments"
+import { notificationsRouter } from "./routes/notifications"
+import { activityRouter } from "./routes/activity"
 import { setupWebSocket } from "./ws/manager"
 import { requireAuth, type AuthRequest } from "./middleware/auth"
 import { runMigrations } from "./db/migrate"
@@ -16,6 +19,7 @@ import { ensureBucket } from "./storage/s3"
 const app = express()
 
 app.use(cors({ origin: process.env.FRONTEND_URL ?? "http://localhost:3000", credentials: true }))
+app.use(cookieParser() as unknown as express.RequestHandler)
 app.use(express.json())
 
 // trust proxy headers so req.ip is the real client IP behind a load balancer / CDN
@@ -48,6 +52,8 @@ app.use("/api/projects", requireAuth, apiLimiter, tasksRouter)
 app.use("/api/tasks", requireAuth, apiLimiter, commentsRouter)
 app.use("/api/tasks", requireAuth, apiLimiter, taskAttachmentsRouter)
 app.use("/api/attachments", requireAuth, apiLimiter, attachmentRouter)
+app.use("/api/notifications", requireAuth, apiLimiter, notificationsRouter)
+app.use("/api/projects", requireAuth, apiLimiter, activityRouter)
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)

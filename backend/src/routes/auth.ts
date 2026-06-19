@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto"
 import { Router, Request, Response } from "express"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
@@ -5,11 +6,25 @@ import { db } from "../db"
 import { users } from "../db/schema"
 import { eq } from "drizzle-orm"
 import { RegisterSchema, LoginSchema } from "@happyrobot/shared"
+import { requireAuth, type AuthRequest } from "../middleware/auth"
+import { revokeToken } from "../revocation"
 
 const router = Router()
 
-function generateToken(userId: string): string {
-  return jwt.sign({ sub: userId }, process.env.JWT_SECRET!, { expiresIn: "7d" })
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: "/",
+}
+
+function generateToken(userId: string, name: string, email: string): string {
+  return jwt.sign(
+    { sub: userId, name, email, jti: randomUUID() },
+    process.env.JWT_SECRET!,
+    { expiresIn: "7d" }
+  )
 }
 
 router.post("/register", async (req: Request, res: Response): Promise<void> => {
@@ -24,10 +39,9 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
 
   try {
     const [user] = await db.insert(users).values({ email, name, passwordHash }).returning()
-    res.status(201).json({
-      token: generateToken(user.id),
-      user: { id: user.id, email: user.email, name: user.name },
-    })
+    const token = generateToken(user.id, user.name, user.email)
+    res.cookie("token", token, COOKIE_OPTS)
+    res.status(201).json({ user: { id: user.id, email: user.email, name: user.name } })
   } catch {
     res.status(409).json({ error: "Email already in use" })
   }
@@ -48,10 +62,21 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
     return
   }
 
-  res.json({
-    token: generateToken(user.id),
-    user: { id: user.id, email: user.email, name: user.name },
-  })
+  const token = generateToken(user.id, user.name, user.email)
+  res.cookie("token", token, COOKIE_OPTS)
+  res.json({ user: { id: user.id, email: user.email, name: user.name } })
+})
+
+router.post("/logout", requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const jti = (req as AuthRequest).tokenJti
+  if (jti) {
+    const raw = req.cookies?.token ?? req.headers.authorization?.slice(7)
+    const payload = raw ? (jwt.decode(raw) as { exp?: number } | null) : null
+    const ttl = payload?.exp ? Math.max(0, payload.exp - Math.floor(Date.now() / 1000)) : 0
+    await revokeToken(jti, ttl)
+  }
+  res.clearCookie("token", COOKIE_OPTS)
+  res.json({ ok: true })
 })
 
 export { router as authRouter }
